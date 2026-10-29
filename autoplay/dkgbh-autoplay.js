@@ -190,6 +190,45 @@
   // 抖动/帧间隔/松手延迟都独立随机，缓动曲线每次混不同幂函数。
   function rand(a, b) { return a + Math.random() * (b - a); }
 
+  // ---------- 统计分布工具（真人的节奏不是均匀分布，这是最容易被检测的地方） ----------
+  // Box-Muller 标准正态
+  function gauss() {
+    var u1 = Math.random() || 1e-9, u2 = Math.random();
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  }
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+  // 人类操作间隔 = 对数正态（大量 1~3 秒 + 少数长停顿），不是均匀分布
+  // medMs: 中位数；sigma 越大尾巴越长。5% 概率叠加「思考停顿」放大 3~5 倍。
+  function humanGap(medMs, minMs, maxMs, pauseRate) {
+    var sigma = 0.42;
+    var v = Math.exp(Math.log(medMs) + sigma * gauss());
+    v = clamp(v, minMs, maxMs);
+    if (Math.random() < (pauseRate == null ? 0.04 : pauseRate)) {
+      v = v * (2 + Math.random() * 1.5);        // 思考停顿：2~3.5 倍（真人会接电话/看提示）
+      v = Math.min(v, maxMs * 2.5);             // 但封顶，别把关卡拖到超时
+    }
+    return v;
+  }
+
+  // Fitts 定律：移动到目标的时间 ∝ log2(距离/目标宽度 + 1)
+  // 参考 ghost-cursor: fitts = 2 * log2(d/w + 1)；这里换成毫秒尺度并夹到人手合理区间
+  function fittsDur(dist, width) {
+    var id = Math.log2(dist / Math.max(width || 60, 8) + 1);
+    return clamp(110 + 205 * id, 240, 1400);
+  }
+
+  // 目标框内的「正态落点」：真人偏中心，不是均匀撒满
+  function gaussPointInRect(node, spread) {
+    var b = boxOf(node);
+    if (!b || !b.w) { var w = node && node.isValid ? node.worldPosition : null; return w ? { x: w.x, y: w.y } : { x: 0, y: 0 }; }
+    var sx = (spread || 0.28) * (b.w / 2), sy = (spread || 0.28) * (b.h / 2);
+    return {
+      x: clamp(b.cx + gauss() * sx, b.x + b.w * 0.06, b.x + b.w * 0.94),
+      y: clamp(b.cy + gauss() * sy, b.y + b.h * 0.06, b.y + b.h * 0.94)
+    };
+  }
+
   // 矩形内缩 inset 的随机点（内缩 12% 起点 / 24% 落点，同掌勺口径）
   function randPointInRect(node, inset) {
     var b = boxOf(node);
@@ -254,20 +293,24 @@
       } else if (plan.pt) {
         b = { x: plan.pt.x + rand(-5, 5), y: plan.pt.y + rand(-5, 5) };
       } else if (target) {
-        b = randPointInRect(target, 0.24);                      // 落点：内缩 24% 随机
+        b = gaussPointInRect(target, 0.24);                     // 落点：正态偏中心
       } else {
         b = a;
       }
 
       var pressMs = mode ? rand(30, 150) : rand(40, 180);       // 按下停顿
-      var dur = mode ? rand(260, 700) : rand(300, 850);         // 总时长
-      var vx = b.x - a.x, vy = b.y - a.y;
-      var dist = Math.sqrt(vx * vx + vy * vy) || 1;
-      // 距离远时按比例给长一点（真人拖远东西会自然慢），但仍在合理区间
-      if (!mode && dist > 400) dur = Math.min(1400, dur * (1 + (dist - 400) / 1200));
-      var nx = -vy / dist, ny = vx / dist;
+      var vx0 = b.x - a.x, vy0 = b.y - a.y;
+      var dist0 = Math.sqrt(vx0 * vx0 + vy0 * vy0) || 1;
+      var tgtW = 0;
+      try { var tb = target ? boxOf(target) : null; tgtW = tb ? Math.min(tb.w, tb.h) : 0; } catch (e) {}
+      // 时长 = Fitts 定律（距离/目标宽度），乘一个 0.85~1.15 的个体差
+      var dur = mode
+        ? Math.min(700, Math.max(240, fittsDur(dist0, tgtW || 100) * 0.8))
+        : fittsDur(dist0, tgtW || 80) * (0.85 + Math.random() * 0.3);
+      dur = clamp(dur, 240, 1500);
+      var nx = -vy0 / dist0, ny = vx0 / dist0;
       var curveAmp = mode ? 0.05 : 0.12;
-      var curve = rand(-curveAmp, curveAmp) * Math.min(dist, 260);
+      var curve = rand(-curveAmp, curveAmp) * Math.min(dist0, 260);
       var jitter = rand(0.4, 2.2), freq = rand(2, 4.5), phase = rand(0, 6.28);
       var ease = makeEase();
       var cur = { x: a.x, y: a.y };
@@ -294,18 +337,36 @@
         function setN(v) { return v; }
       }
 
+      // 过冲：远处拖动时先冲过目标 20~60px，再折回（真人手会"刹不住"）
+      var osAmount = (dist0 > 400 && Math.random() < 0.7) ? rand(20, 60) : 0;
+      var osPoint = osAmount ? {
+        x: b.x + (vx0 / dist0) * osAmount,
+        y: b.y + (vy0 / dist0) * osAmount
+      } : null;
+
       setTimeout(function () {
-        travel(a, b, dur, function () {
-          (function fix() {
-            if (!plan.fit || !target || !target.worldPosition) return finish();
-            var off = null;
-            try { off = bestOffset(n, target, plan.fit); } catch (e) { off = null; }
-            if (!off || (Math.abs(off.dx) < 2 && Math.abs(off.dy) < 2)) return finish();
-            if (++fixRound > 3) return finish();
-            var from = { x: cur.x, y: cur.y };
-            var to = { x: cur.x + off.dx, y: cur.y + off.dy };
-            travel(from, to, rand(60, 140), fix);                // 微调也用随机时长
-          })();
+        travel(a, osPoint || b, dur, function () {
+          // ① 若安排了过冲，先把手指再往目标外侧送一点（真人「刹不住」）
+          if (osPoint) {
+            // 已经冲到过冲点 → 折回目标（80~160ms 的短修正，真人"回手"）
+            osPoint = null;
+            travel({ x: cur.x, y: cur.y }, b, rand(80, 160), fixOnce);
+          } else {
+            fixOnce();
+          }
+          // ③ 闭环微调（判定体是子节点/祖先的关卡需要）：最多 3 轮
+          function fixOnce() {
+            (function fix() {
+              if (!plan.fit || !target || !target.worldPosition) return finish();
+              var off = null;
+              try { off = bestOffset(n, target, plan.fit); } catch (e) { off = null; }
+              if (!off || (Math.abs(off.dx) < 2 && Math.abs(off.dy) < 2)) return finish();
+              if (++fixRound > 3) return finish();
+              var f2 = { x: cur.x, y: cur.y };
+              var t2 = { x: cur.x + off.dx, y: cur.y + off.dy };
+              travel(f2, t2, rand(60, 140), fix);                // 微调也用随机时长
+            })();
+          }
         });
       }, pressMs);
 
@@ -944,10 +1005,11 @@
           var sameGroup = !miniChanged && (stepNow === lastStep);
           var isRepeat = (lastRepeat && stepNow === lastStep);
           var gap;
-          if (isRepeat) gap = 80 + Math.random() * 270;
-          else if (sameGroup) gap = 250 + Math.random() * 650;
-          else if (miniChanged) gap = 3000 + Math.random() * 2000;   // 换画面段（远山口径 3~5s）  // 换画面段（远山口径 3~5s）
-          else gap = 1000 + Math.random() * 2000;   // 同段内换步骤（远山口径 1~3s）
+          // 四档间隔全部用「对数正态」（真人节奏：大量中等间隔 + 少数长停顿）
+          if (isRepeat) gap = humanGap(160, 80, 420, 0.02);
+          else if (sameGroup) gap = humanGap(520, 250, 1100, 0.03);
+          else if (miniChanged) gap = humanGap(4200, 2600, 9000, 0.03);   // 换画面段：中位 4.2s，偶尔看十几秒
+          else gap = humanGap(1800, 900, 4200, 0.05);                      // 同段换步骤：中位 1.8s
           var prevMini = lastMini;                 // 留给日志用（更新前的值）
           if (miniNow !== null && miniNow >= 0) lastMini = miniNow;
           lastGroup = grp;
