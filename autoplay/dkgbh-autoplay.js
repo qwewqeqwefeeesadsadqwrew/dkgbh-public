@@ -328,9 +328,64 @@
     var p = randPointInRect(n, 0.2);
     var real = Math.max(300, hold || 800) + rand(100, 600);      // 多按一点，卡底线容易失败
     emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
+    var t0 = now();
+    // 按住期间每 120~260ms 微动一次（±3px）：真人按住手指不会完全静止（照掌勺）
+    (function jitter() {
+      if (now() - t0 >= real) return;
+      emit(n, cc.Node.EventType.TOUCH_MOVE, p.x + rand(-3, 3), p.y + rand(-3, 3));
+      setTimeout(jitter, rand(120, 260));
+    })();
     return sleep(real).then(function () {
       emit(n, cc.Node.EventType.TOUCH_END, p.x, p.y);
       return real;
+    });
+  }
+
+  // 来回擦（照掌勺 rub）：振幅 14~42、周期 30~60、方向 50% 随机、时长 = 要求 + 400~900ms
+  function rub(n, seconds) {
+    var p = randPointInRect(n, 0.2);
+    var amp = rand(14, 42), vertical = Math.random() < 0.5, period = rand(30, 60);
+    var until = now() + Math.max(800, (Number(seconds) || 1) * 1000 + rand(400, 900));
+    var dir = 1, frames = 0;
+    emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
+    return new Promise(function (resolve) {
+      (function tick() {
+        if (now() >= until) {
+          emit(n, cc.Node.EventType.TOUCH_END, p.x, p.y);
+          recordGesture({ type: 'rub', node: n.name, dur: Math.round(until - (until - 1000)), press: 0, curve: 0, orientation: vertical ? 'v' : 'h', points: frames });
+          return resolve(until - (until - 1000));
+        }
+        var off = dir * amp;
+        emit(n, cc.Node.EventType.TOUCH_MOVE, vertical ? p.x + rand(-2, 2) : p.x + off, vertical ? p.y + off : p.y + rand(-2, 2));
+        dir = -dir; frames++;
+        setTimeout(tick, period + rand(0, 12));
+      })();
+    });
+  }
+
+  // 区域擦除（照掌勺）：矩形内蛇形扫，inset 18~28 / 行距 36~52 / stepMs 16~34 / 方向随机
+  function wipe(n, area) {
+    var b = area && area.worldPos ? null : boxOf(n);
+    if (!b) return Promise.resolve(0);
+    var inset = rand(18, 28), gap = rand(36, 52);
+    var vertical = Math.random() < 0.5, stepMs = rand(16, 34);
+    var x0 = b.x + inset, x1 = b.x + b.w - inset, y0 = b.y + inset, y1 = b.y + b.h - inset;
+    var pts = [], cur = y0, dir = 1;
+    while (cur <= y1) { pts.push(dir > 0 ? [x0, cur] : [x1, cur]); dir = -dir; cur += gap; }
+    var t0 = now();
+    emit(n, cc.Node.EventType.TOUCH_START, pts[0][0], pts[0][1]);
+    return new Promise(function (resolve) {
+      var i = 1;
+      (function step() {
+        if (i >= pts.length) {
+          emit(n, cc.Node.EventType.TOUCH_END, pts[pts.length - 1][0], pts[pts.length - 1][1]);
+          recordGesture({ type: 'wipe', node: n.name, dur: Math.round(now() - t0), press: 0, curve: 0, orientation: vertical ? 'v' : 'h', points: pts.length, gap: Math.round(gap), stepMs: Math.round(stepMs) });
+          return resolve(now() - t0);
+        }
+        emit(n, cc.Node.EventType.TOUCH_MOVE, pts[i][0], pts[i][1]);
+        i++;
+        setTimeout(step, stepMs);
+      })();
     });
   }
   function longPress(n, hold) {
@@ -613,6 +668,11 @@
     kids.sort(function (a, b) { return a.b.w * a.b.h - b.b.w * b.b.h; });
     if (kids.length) out.push({ pt: { x: tb.cx, y: tb.cy }, fit: kids[0].n });
     if (boxOf(node)) out.push({ pt: { x: tb.cx, y: tb.cy }, fit: node });
+    // 再补 3 个矩形内随机点（内缩 24%）：单点失手时换点，不换目标
+    for (var r = 0; r < 3; r++) {
+      var rp = randPointInRect(target, 0.24);
+      out.push({ pt: rp, fit: null });
+    }
     return out;
   }
 
@@ -638,6 +698,8 @@
       var cc1 = clickCandidates(a);
       return click(cc1[(tryIdx || 0) % cc1.length]);
     }
+    if (type === 6) return rub(a, 1);                     // 预留：来回擦
+    if (type === 7) return wipe(a);                        // 预留：区域擦除
     if (type === 2) {
       if (!(b && b.worldPosition)) return drag(a, b, null, { pt: null, fit: null });
       var k = tryIdx || 0;
