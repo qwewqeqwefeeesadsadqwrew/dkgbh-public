@@ -459,10 +459,54 @@
   // 它一被调用就是真换画面 → 下一步动手前停 3~5 秒；段内的小变化（画笔淡入、零件位移）不算。
   var pendingScene = false;
   var sceneHooks = [];
+  var lastHookTarget = null;
+
+  // 画面段索引 = 关卡 pic[] 里「位置最靠近屏幕中间」的那个段
+  // 依据（读 Level0 源码 + 实测）：切镜就是 tween(pic[a]).to(-1200) + tween(pic[b]).to(0)，
+  // 没有任何阶段字段；所以「谁的 x≈0」就是当前段 —— 等价于掌勺的 currentMiniLv。
+  // 实测（Level0）：#0-5 段0 → #6 段1 → #11 段2，整关只 2 次换段。
+  // ===== 等价于掌勺的 p.currentMiniLv（运行时装字段；游戏文件不改一个字节）=====
+  // 掌勺那款游戏由程序维护「当前小关号」；本作没有这个字段（切镜是纯补间动画），
+  // 所以在关卡组件上装一个同名语义的字段，由本层负责刷新；驱动只读字段。
+  function installMiniLv(lv) {
+    if (!lv || lv.__miniLvInstalled) return false;
+    try { lv.__miniLvInstalled = true; } catch (e) { return false; }
+    lv.currentMiniLv = -1;
+    var now0 = segIndex(lv, true);   // 取基线时允许未移动的层（常驻层索引更大，argmin 仍落在真段上）
+    if (now0 >= 0) lv.currentMiniLv = now0;      // 立刻刷一次，基线不留 -1
+    var timer = setInterval(function () {
+      if (!lv || !lv.isValid) { clearInterval(timer); return; }
+      var k = segIndex(lv);
+      if (k >= 0) lv.currentMiniLv = k;
+    }, 120);
+    return true;
+  }
+
+  function segIndex(lv, allowUnmoved) {
+    try {
+      if (!lv || !Array.isArray(lv.pic) || !lv.pic.length) return null;
+      var best = -1, bestAbs = 1e9;
+      for (var k = 0; k < lv.pic.length; k++) {
+        var nd = lv.pic[k];
+        if (!nd || !nd.isValid) continue;
+        var x = nd.position.x;
+        // 记录「这一层动过没有」：常驻 UI 层永远不动，不能当画面段（曾把它误判成第 6 段）
+        if (nd.__lastX === undefined) nd.__lastX = x;
+        else if (Math.abs(nd.__lastX - x) > 2) { nd.__moved = true; nd.__lastX = x; }
+        if (!nd.__moved && !allowUnmoved) continue;   // 还没动过的层先不当段候选（取基线时例外）
+        var abs = Math.abs(x);
+        if (abs < bestAbs) { bestAbs = abs; best = k; }
+      }
+      // 补间过程中可能所有段都不在 0（正在滑），此时返回 -1（不判换段），等稳定再说
+      return bestAbs < 300 ? best : -1;
+    } catch (e) { return null; }
+  }
   var SCENE_RE = /qieJing|cutScene|changeScene|nextScene|switchScene|goNextScene|playCut/i;
 
   function hookSceneMethods(lv) {
-    if (!lv || lv.__sceneHooked) return;
+    if (!lv) return;
+    if (lv !== lastHookTarget) { sceneHooks = []; lastHookTarget = lv; }   // 换关重置，别跨关累积
+    if (lv.__sceneHooked) return;
     try { lv.__sceneHooked = true; } catch (e) { return; }
     var names = [];
     var proto = Object.getPrototypeOf(lv), guard = 0;
@@ -779,14 +823,31 @@
       var steps = g._steps;
       log('steps=' + steps.length);
       hideDebugHud();
-      hookSceneMethods(levelComp());
+      var lv0 = levelComp();
+      hookSceneMethods(lv0);
+      installMiniLv(lv0);                    // 装上 currentMiniLv（运行时字段）
       // 开局观察 3~5 秒（照掌勺 beginIntro：刚进关立刻拖会读到未渲染完的位置，也不像人）
       var introMs = opts.introMs != null ? opts.introMs : (3000 + Math.random() * 2000);
       var tReady = now();
       log('intro-start', 'readyAfter=' + Math.round((tReady - t0) / 1000) + 's', 'intro=' + Math.round(introMs) + 'ms');
       return sleep(introMs).then(function () {
         log('intro-end', 'total=' + Math.round((now() - t0) / 1000) + 's');
-        var i = 0, lastGroup = null, lastSig = null, actMs = 0;
+        var i = 0, actMs = 0, lastRepeat = false;
+        var lastMini = null, lastStep = -1, lastGroup = null, useFieldMode = true;
+        // 进关基线：把「当前段」先标记成会动的层（否则第一次换段判不出来）
+        (function markCurrentSeg() {
+          try {
+            var lv = levelComp();
+            if (!lv || !Array.isArray(lv.pic)) return;
+            for (var k = 0; k < lv.pic.length; k++) {
+              var nd = lv.pic[k];
+              if (!nd || !nd.isValid) continue;
+              if (Math.abs(nd.position.x) < 300) { nd.__moved = true; nd.__lastX = nd.position.x; break; }
+            }
+          } catch (e) {}
+        })();
+        lastMini = (levelComp() || {}).currentMiniLv;   // 进关基线段号（读字段，出生就记一次）
+        log('seg-base', lastMini);
 
         function next() {
           if (STOP) { reason = 'stopped'; return null; }
@@ -805,19 +866,46 @@
           var step = steps[i];
           var node = step[1];
           // —— 换段判断（照掌勺：用「要做的这一步」的组跟上次比，不同就先停再做）——
-          var grp = groupKey(node);
-          // 换画面判据（优先级从高到低）：
-          //   ① 关卡的切镜方法被调用过（真值，最准）
-          //   ② 段名变了（兜底，用于没提供切镜方法的关卡）
-          var needSeg = false;
-          if (pendingScene) { needSeg = true; pendingScene = false; }
-          else if (lastGroup != null && grp !== lastGroup) { needSeg = true; }
+          // ===== 严格照《我来掌勺》wlzs-autoplay.js 的 tick() 骨架 =====
+          //   var miniNow = p.currentMiniLv, stepNow = p.currentStepNum;
+          //   var sameGroup = (miniNow === lastMini && stepNow === lastStep);
+          //   repeat ? 80+rand*270 : sameGroup ? 250+rand*650 : 1000+rand*2000
+          //   lastMini = miniNow; lastStep = stepNow;
+          //   waitUntil = now + max(dur*1000 + 650 + rand(0,350), gap)
+          var lvNow = levelComp();
+          var miniNow = lvNow ? lvNow.currentMiniLv : null;   // == p.currentMiniLv（掌勺同一行）
+          var grp = groupKey(node);                          // 结构兜底用
+          var stepNow = i;                          // == currentStepNum
+          // 换画面判据（字段优先、段名兜底，并做防抖）
+          // 防抖原因：段名（源节点祖先）会比画面真的切完早 1~2 步；字段要等补间结束才变。
+          // 不防抖时同一次换画面会停两遍（实测第 1 关 step3 段名、step4 字段各停一次）。
+          var segChanged = (miniNow !== null && miniNow >= 0 && lastMini >= 0 && miniNow !== lastMini);
+          var nameChanged = (lastGroup !== null && grp !== lastGroup);
+          var miniChanged = false;
+          if (useFieldMode) {
+            if (segChanged) { miniChanged = true; log('seg-field', miniNow, 'prev=' + lastMini); }
+            else if (nameChanged) {
+              // 段名变了但段号字段没跟上 → 这关的字段不可信，永久切到结构兜底
+              useFieldMode = false; miniChanged = true; log('seg-switch-name', grp);
+            }
+          } else {
+            if (nameChanged) { miniChanged = true; log('seg-name', grp); }
+          }
+          var sameGroup = !miniChanged && (stepNow === lastStep);
+          var isRepeat = (lastRepeat && stepNow === lastStep);
+          var gap;
+          if (isRepeat) gap = 80 + Math.random() * 270;
+          else if (sameGroup) gap = 250 + Math.random() * 650;
+          else if (miniChanged) gap = 3000 + Math.random() * 2000;   // 换画面段（远山口径 3~5s）  // 换画面段（远山口径 3~5s）
+          else gap = 1000 + Math.random() * 2000;   // 同段内换步骤（远山口径 1~3s）
+          var prevMini = lastMini;                 // 留给日志用（更新前的值）
+          if (miniNow !== null && miniNow >= 0) lastMini = miniNow;
           lastGroup = grp;
+          lastStep = stepNow;
           var pre = Promise.resolve();
-          if (needSeg) {
-            var segMs = rand(3000, 5000);
-            log('seg-wait', grp, Math.round(segMs) + 'ms', 'timer=' + state().timer, needSeg === true ? '(切镜)' : '');
-            pre = sleep(segMs);
+          if (gap > 1200) {
+            log('gap', 'mini=' + miniNow + '(prev=' + prevMini + ')', 'step=' + stepNow, Math.round(gap) + 'ms');
+            pre = sleep(gap);
           }
           var tries = 0;
           var t2 = Number(step[0]);
@@ -842,12 +930,12 @@
             }).then(function (r2) {
               if (r2.ok) {
                 // 节奏：换组 1000~3000ms，同组 250~900ms；下限不许抢在动画前面
-                // 操作之间 1~3 秒（换段观察已在动手前做过，这里统一按步间节奏；都不压缩）
-                var gap = rand(1000, 3000);
-                gap = Math.max(gap, (actMs || 0) + rand(650, 1000));
+                // 照掌勺：等 = max(动画时长 + 650 + rand(0,350), 下一拍的 gap)
+                // （下一拍的 gap 已在 next() 入口按 sameGroup/换段算好，这里只做安全余量）
+                var tail = Math.max((actMs || 0) + 650 + Math.random() * 350, 0);
                 actMs = 0;
                 i++;
-                return sleep(gap).then(next);
+                return sleep(tail).then(next);
               }
               if (tries >= maxTry) {
                 log('step-stuck', i, 'type', step[0], node && node.name);
