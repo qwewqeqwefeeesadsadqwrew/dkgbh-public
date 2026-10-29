@@ -975,7 +975,7 @@
         .then(function () {
           if (popShown('PopVictory')) { try { app().manager.ui.hide({ name: 'PopVictory' }); } catch (e) {} }
           if (popShown('PopFail')) { try { app().manager.ui.hide({ name: 'PopFail' }); } catch (e) {} }
-          return sleep(rand(300, 900));
+          return sleep(rand(287, 913));
         })
         .then(function () { return root.__AUTO.enter(idx, opts.mode); })
         .then(function () { return sleep(rand(800, 1800)); })
@@ -985,9 +985,9 @@
             // 首次进关可能比引擎就绪还早：退回去重进一次
             log('retry-enter', idx, r.reason);
             if (popShown('PopLoad')) { try { app().manager.ui.hide({ name: 'PopLoad' }); } catch (e) {} }
-            return sleep(rand(2000, 3500))
+            return sleep(rand(1931, 3617))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
-              .then(function () { return sleep(rand(2500, 4000)); })
+              .then(function () { return sleep(rand(2411, 4087)); })
               .then(function () { return playLevel(opts); });
           }
           return r;
@@ -998,7 +998,7 @@
           results.push(r0);
           log('LEVEL', idx, r0.reason, r0.tips);
           k++;
-          return sleep(rand(2000, 4000));   // 打完看结算的自然停顿
+          return sleep(rand(2137, 3929));   // 打完看结算的自然停顿
         })
         .then(one);
     }
@@ -1025,19 +1025,19 @@
           // 清掉上一关的弹窗
           if (popShown('PopVictory')) { try { var a = app(); a.manager.ui.hide({ name: 'PopVictory' }); } catch (e) {} }
           if (popShown('PopFail')) { try { var a2 = app(); a2.manager.ui.hide({ name: 'PopFail' }); } catch (e) {} }
-          return sleep(600);
+          return sleep(413 + Math.random() * 517);   // 收弹窗：413~930ms 随机
         })
         .then(function () { return root.__AUTO.enter(idx, opts.mode); })
-        .then(function () { return sleep(1200); })
+        .then(function () { return sleep(877 + Math.random() * 803); })   // 等关卡起：877~1680ms 随机
         .then(function () { return playLevel(opts); })
         .then(function (r) {
           if (r && (r.reason === 'not-ready' || r.reason === 'no-steps')) {
             // 首次进关可能比引擎就绪还早：退回去重进一次
             log('retry-enter', idx, r.reason);
             if (popShown('PopLoad')) { try { app().manager.ui.hide({ name: 'PopLoad' }); } catch (e) {} }
-            return sleep(rand(2000, 3500))
+            return sleep(rand(1931, 3617))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
-              .then(function () { return sleep(rand(2500, 4000)); })
+              .then(function () { return sleep(rand(2411, 4087)); })
               .then(function () { return playLevel(opts); });
           }
           return r;
@@ -1048,7 +1048,7 @@
           results.push(r0);
           log('LEVEL', idx, r0.reason, r0.tips);
           idx++;
-          return sleep(rand(2000, 4000));   // 打完看结算的自然停顿
+          return sleep(rand(2137, 3929));   // 打完看结算的自然停顿
         })
         .then(one);
     }
