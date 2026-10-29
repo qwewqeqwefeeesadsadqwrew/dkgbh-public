@@ -558,6 +558,36 @@
     } catch (err) { return false; }
   }
 
+  // ===== 预加载下一关（把「关卡加载」的等待藏进当前关的拟人停顿里）=====
+  // 依据：Cocos 3.8 的 bundle 缓存；PageGame.onHide 只 removeBundle(当前关)，预载的下一关不会被清掉。
+  var preloaded = {};
+  function preloadLevelBundle(idx) {
+    try {
+      if (idx == null) return;
+      if (preloaded[idx]) return;
+      preloaded[idx] = true;
+      var mc = mod('chunks:///_virtual/modeConfig.ts');
+      var list = mc && mc.cl_modeConfig && mc.cl_modeConfig.modeToLevelList.get('文字');
+      var info = list && list[idx];
+      if (!info || !info.bundle) return;
+      var name = info.bundle;
+      if (cc.assetManager.bundles.has(name)) { log('preload-skip', name, '已在内存'); return; }
+      log('preload-start', name);
+      var t0 = now();
+      cc.assetManager.loadBundle(name, function (err, bundle) {
+        if (err || !bundle) { log('preload-fail', name, String(err).slice(0, 60)); preloaded[idx] = false; return; }
+        log('preload-bundle-ok', name, Math.round(now() - t0) + 'ms');
+        // 再预载资源（图片/音频/预制体），进关时就不用现拉
+        try {
+          bundle.preload('.', function (e2) {
+            if (e2) { log('preload-assets-fail', name, String(e2).slice(0, 60)); return; }
+            log('preload-ok', name, Math.round(now() - t0) + 'ms');
+          });
+        } catch (e) { log('preload-assets-err', String(e).slice(0, 60)); }
+      });
+    } catch (e) { log('preload-err', String(e).slice(0, 80)); }
+  }
+
   function popShown(name) {
     var found = null;
     (function walk(n) {
@@ -826,6 +856,10 @@
       var lv0 = levelComp();
       hookSceneMethods(lv0);
       installMiniLv(lv0);                    // 装上 currentMiniLv（运行时字段）
+      // 用「开局观察」的空窗预加载下一关（不抢当前关的加载带宽）
+      if (opts.nextIdx != null) {
+        setTimeout(function () { preloadLevelBundle(opts.nextIdx); }, rand(3000, 5000));
+      }
       // 开局观察 3~5 秒（照掌勺 beginIntro：刚进关立刻拖会读到未渲染完的位置，也不像人）
       var introMs = opts.introMs != null ? opts.introMs : (3000 + Math.random() * 2000);
       var tReady = now();
@@ -979,7 +1013,11 @@
         })
         .then(function () { return root.__AUTO.enter(idx, opts.mode); })
         .then(function () { return sleep(rand(800, 1800)); })
-        .then(function () { return playLevel(opts); })
+        .then(function () {
+          var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
+          o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
+          return playLevel(o2);
+        })
         .then(function (r) {
           if (r && (r.reason === 'not-ready' || r.reason === 'no-steps')) {
             // 首次进关可能比引擎就绪还早：退回去重进一次
@@ -988,7 +1026,11 @@
             return sleep(rand(1931, 3617))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
               .then(function () { return sleep(rand(2411, 4087)); })
-              .then(function () { return playLevel(opts); });
+              .then(function () {
+          var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
+          o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
+          return playLevel(o2);
+        });
           }
           return r;
         })
@@ -1029,7 +1071,11 @@
         })
         .then(function () { return root.__AUTO.enter(idx, opts.mode); })
         .then(function () { return sleep(877 + Math.random() * 803); })   // 等关卡起：877~1680ms 随机
-        .then(function () { return playLevel(opts); })
+        .then(function () {
+          var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
+          o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
+          return playLevel(o2);
+        })
         .then(function (r) {
           if (r && (r.reason === 'not-ready' || r.reason === 'no-steps')) {
             // 首次进关可能比引擎就绪还早：退回去重进一次
@@ -1038,7 +1084,11 @@
             return sleep(rand(1931, 3617))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
               .then(function () { return sleep(rand(2411, 4087)); })
-              .then(function () { return playLevel(opts); });
+              .then(function () {
+          var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
+          o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
+          return playLevel(o2);
+        });
           }
           return r;
         })
