@@ -194,7 +194,11 @@
   function randPointInRect(node, inset) {
     var b = boxOf(node);
     inset = inset || 0;
-    if (!b || !b.w) { var w = node.worldPosition; return { x: w.x, y: w.y }; }
+    if (!b || !b.w) {
+      // 节点可能刚被销毁 / 父节点已摘：worldPosition 会是 null，别让整轮崩掉
+      var w = node && node.isValid ? node.worldPosition : null;
+      return w ? { x: w.x, y: w.y } : { x: 0, y: 0 };
+    }
     var iw = b.w * (1 - 2 * inset), ih = b.h * (1 - 2 * inset);
     return { x: b.x + b.w * inset + Math.random() * Math.max(iw, 0), y: b.y + b.h * inset + Math.random() * Math.max(ih, 0) };
   }
@@ -448,6 +452,37 @@
         for (var i = 0; i < ch.length; i++) walk(ch[i]);
       })(cc.director.getScene());
     } catch (e) {}
+  }
+
+  // ---------- 换画面信号（照掌勺思路：读游戏真值，不猜节点结构） ----------
+  // 玩法关卡通常会提供自己的「换画面」动作（本作是 qieJingyi / qieJinger / qieJingsan）。
+  // 它一被调用就是真换画面 → 下一步动手前停 3~5 秒；段内的小变化（画笔淡入、零件位移）不算。
+  var pendingScene = false;
+  var sceneHooks = [];
+  var SCENE_RE = /qieJing|cutScene|changeScene|nextScene|switchScene|goNextScene|playCut/i;
+
+  function hookSceneMethods(lv) {
+    if (!lv || lv.__sceneHooked) return;
+    try { lv.__sceneHooked = true; } catch (e) { return; }
+    var names = [];
+    var proto = Object.getPrototypeOf(lv), guard = 0;
+    while (proto && proto !== Object.prototype && guard++ < 8) {
+      Object.getOwnPropertyNames(proto).forEach(function (n) { names.push(n); });
+      proto = Object.getPrototypeOf(proto);
+    }
+    Object.keys(lv).forEach(function (n) { names.push(n); });
+    names.filter(function (n, i) { return names.indexOf(n) === i; })
+      .forEach(function (fn) {
+        if (!SCENE_RE.test(fn) || typeof lv[fn] !== 'function') return;
+        var orig = lv[fn];
+        lv[fn] = function () {
+          pendingScene = true;
+          log('scene-hook', fn);
+          return orig.apply(this, arguments);
+        };
+        sceneHooks.push(fn);
+      });
+    log('scene-hooks', sceneHooks.length ? sceneHooks.join(',') : '无（退回段名判据）');
   }
 
   var lastAddAt = 0;
@@ -744,6 +779,7 @@
       var steps = g._steps;
       log('steps=' + steps.length);
       hideDebugHud();
+      hookSceneMethods(levelComp());
       // 开局观察 3~5 秒（照掌勺 beginIntro：刚进关立刻拖会读到未渲染完的位置，也不像人）
       var introMs = opts.introMs != null ? opts.introMs : (3000 + Math.random() * 2000);
       var tReady = now();
@@ -770,14 +806,17 @@
           var node = step[1];
           // —— 换段判断（照掌勺：用「要做的这一步」的组跟上次比，不同就先停再做）——
           var grp = groupKey(node);
-          // 只在「画面段真的换了」（cj1→cj2 / bj2→bj3）才做 3~5 秒观察；
-          // 段内的小变化（道具淡入、位置微调）不停这么久，交给普通 1~3 秒节奏（远山 2026-10-29 口径）
-          var needSeg = (lastGroup != null) && (grp !== lastGroup);
+          // 换画面判据（优先级从高到低）：
+          //   ① 关卡的切镜方法被调用过（真值，最准）
+          //   ② 段名变了（兜底，用于没提供切镜方法的关卡）
+          var needSeg = false;
+          if (pendingScene) { needSeg = true; pendingScene = false; }
+          else if (lastGroup != null && grp !== lastGroup) { needSeg = true; }
           lastGroup = grp;
           var pre = Promise.resolve();
           if (needSeg) {
             var segMs = rand(3000, 5000);
-            log('seg-wait', grp, Math.round(segMs) + 'ms', 'timer=' + state().timer);
+            log('seg-wait', grp, Math.round(segMs) + 'ms', 'timer=' + state().timer, needSeg === true ? '(切镜)' : '');
             pre = sleep(segMs);
           }
           var tries = 0;
