@@ -197,7 +197,7 @@
 
   function loadDriver(cb) {
     var sc = document.createElement('script');
-    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=1';
+    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=2';
     sc.onload = function () { cb(); };
     sc.onerror = function () { log('驱动加载失败'); };
     document.body.appendChild(sc);
