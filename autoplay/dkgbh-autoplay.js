@@ -577,13 +577,22 @@
       cc.assetManager.loadBundle(name, function (err, bundle) {
         if (err || !bundle) { log('preload-fail', name, String(err).slice(0, 60)); preloaded[idx] = false; return; }
         log('preload-bundle-ok', name, Math.round(now() - t0) + 'ms');
-        // 再预载资源（图片/音频/预制体），进关时就不用现拉
+        // 再预载整个 bundle 的资源（图片/音频/预制体），进关时就不用现拉
+        // 注意：bundle.preload('.') 会报 "Bundle xxx doesn't contain ."，要用 preloadDir('')
         try {
-          bundle.preload('.', function (e2) {
-            if (e2) { log('preload-assets-fail', name, String(e2).slice(0, 60)); return; }
-            log('preload-ok', name, Math.round(now() - t0) + 'ms');
+          bundle.preloadDir('', null, null, function (e2) {
+            // 失败是常态（pack 内资源没有独立文件，preloadDir 会 404），能下的已经进缓存了
+            if (e2) log('preload-assets-partial', name, '（部分资源在 pack 内，忽略）');
+            else log('preload-ok', name, Math.round(now() - t0) + 'ms');
           });
-        } catch (e) { log('preload-assets-err', String(e).slice(0, 60)); }
+        } catch (e) {
+          try {
+            bundle.preload('.', function (e3) {
+              if (e3) { log('preload-assets-fail2', name, String(e3).slice(0, 60)); return; }
+              log('preload-ok2', name, Math.round(now() - t0) + 'ms');
+            });
+          } catch (e4) { log('preload-assets-err', String(e4).slice(0, 60)); }
+        }
       });
     } catch (e) { log('preload-err', String(e).slice(0, 80)); }
   }
