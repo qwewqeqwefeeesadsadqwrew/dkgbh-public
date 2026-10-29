@@ -561,6 +561,27 @@
   // ===== 预加载下一关（把「关卡加载」的等待藏进当前关的拟人停顿里）=====
   // 依据：Cocos 3.8 的 bundle 缓存；PageGame.onHide 只 removeBundle(当前关)，预载的下一关不会被清掉。
   var preloaded = {};
+  // 预载 bundle 内资源：用官方 bundle.preload(路径数组)
+  // 依据（读引擎源码）：preload → preloadAny({__requestType__: PATH, bundle})，按 assetInfo 走，
+  // 打包（pack）里的资源会从 pack 读；而 preloadDir 用 DIR 枚举文件，pack 资源没有独立文件 → 必然 404。
+  var prefetched = {};
+  function prefetchBundleAssets(bundle, name) {
+    try {
+      if (prefetched[name]) return;
+      prefetched[name] = true;
+      var cfg = bundle && bundle._config;
+      if (!cfg || !cfg.paths || !cfg.paths._map) { log('prefetch-nocfg', name); return; }
+      var paths = [];
+      Object.keys(cfg.paths._map).forEach(function (key) { paths.push(key); });
+      log('prefetch-start', name, paths.length + ' 个资源路径');
+      var t0 = now();
+      bundle.preload(paths, function (err) {
+        if (err) log('prefetch-partial', name, String(err).slice(0, 60), Math.round(now() - t0) + 'ms');
+        else log('prefetch-ok', name, Math.round(now() - t0) + 'ms');
+      });
+    } catch (e) { log('prefetch-err', String(e).slice(0, 80)); }
+  }
+
   function preloadLevelBundle(idx) {
     try {
       if (idx == null) return;
@@ -577,22 +598,8 @@
       cc.assetManager.loadBundle(name, function (err, bundle) {
         if (err || !bundle) { log('preload-fail', name, String(err).slice(0, 60)); preloaded[idx] = false; return; }
         log('preload-bundle-ok', name, Math.round(now() - t0) + 'ms');
-        // 再预载整个 bundle 的资源（图片/音频/预制体），进关时就不用现拉
-        // 注意：bundle.preload('.') 会报 "Bundle xxx doesn't contain ."，要用 preloadDir('')
-        try {
-          bundle.preloadDir('', null, null, function (e2) {
-            // 失败是常态（pack 内资源没有独立文件，preloadDir 会 404），能下的已经进缓存了
-            if (e2) log('preload-assets-partial', name, '（部分资源在 pack 内，忽略）');
-            else log('preload-ok', name, Math.round(now() - t0) + 'ms');
-          });
-        } catch (e) {
-          try {
-            bundle.preload('.', function (e3) {
-              if (e3) { log('preload-assets-fail2', name, String(e3).slice(0, 60)); return; }
-              log('preload-ok2', name, Math.round(now() - t0) + 'ms');
-            });
-          } catch (e4) { log('preload-assets-err', String(e4).slice(0, 60)); }
-        }
+        // 再预取资源（图片/音频）：按 config 自己拼 URL 用 fetch 拉，SW 会缓存
+        prefetchBundleAssets(bundle, name);
       });
     } catch (e) { log('preload-err', String(e).slice(0, 80)); }
   }
