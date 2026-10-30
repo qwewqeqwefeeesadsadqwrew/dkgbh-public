@@ -9,7 +9,7 @@
 (function () {
   'use strict';
 
-  var POOL = [];                       // 关卡索引池（默认 0..19 = 前 20 关）
+  var POOL = [];                       // 关卡索引池（0..39 = 前 40 关）
   for (var p = 0; p < 40; p++) POOL.push(p);
   var MODE = '文字';
   var LOOP = true;                     // 无终态，一直循环
@@ -197,7 +197,7 @@
 
   function loadDriver(cb) {
     var sc = document.createElement('script');
-    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=23';
+    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=24';
     sc.onload = function () { cb(); };
     sc.onerror = function () { log('驱动加载失败'); };
     document.body.appendChild(sc);
@@ -205,6 +205,8 @@
 
   waitRuntime(function () {
     var go = function () {
+      // ?boot=0 → 只加载引擎与首页，不自动开打（调试/探针用）
+      if (/[?&]boot=0/.test(location.search)) { log('boot=0：不自播，等外部控制'); return; }
       waitHome(function () {
         DEMO.state = 'ready';
         setTimeout(function () {

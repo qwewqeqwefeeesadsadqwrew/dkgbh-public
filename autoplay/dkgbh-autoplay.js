@@ -659,8 +659,21 @@
       cc.assetManager.loadBundle(name, function (err, bundle) {
         if (err || !bundle) { log('preload-fail', name, String(err).slice(0, 60)); preloaded[idx] = false; return; }
         log('preload-bundle-ok', name, Math.round(now() - t0) + 'ms');
-        // 再预取资源（图片/音频）：按 config 自己拼 URL 用 fetch 拉，SW 会缓存
-        prefetchBundleAssets(bundle, name);
+        // 关键：只 loadBundle 不够（110ms 就完了），关卡资源还得单独 preload
+        // 技能实测：不 preload → readyAfter 7~12s；preload → 接近 0
+        try {
+          var P = (bundle._config && bundle._config.paths && bundle._config.paths._map) || null;
+          var paths = P ? Object.keys(P) : null;
+          if (paths && paths.length) {
+            var t1 = now();
+            bundle.preload(paths, function (e2) {
+              // 有报错是常态（部分资源按需加载），不当失败
+              log('preload-assets-ok', name, paths.length + ' paths', Math.round(now() - t1) + 'ms', e2 ? ('err=' + String(e2).slice(0, 40)) : '');
+            });
+          } else {
+            prefetchBundleAssets(bundle, name);   // 拿不到路径表时退回自己拼 URL
+          }
+        } catch (e2) { log('preload-assets-err', String(e2).slice(0, 60)); }
       });
     } catch (e) { log('preload-err', String(e).slice(0, 80)); }
   }
