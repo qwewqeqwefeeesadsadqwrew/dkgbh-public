@@ -65,11 +65,11 @@
     // 运行时缓存：第一次用到哪就缓存哪，之后每关读本地
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/sw.js', { scope: '/dkgbh-public/' })
+        navigator.serviceWorker.register('https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/sw.js', { scope: 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/' })
           .catch(function (e) { console.warn('[sw] 注册失败', e); });
       });
     }
   </script>
-  <script src="https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/boot.js?v=3"></script>
+  <script src="https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/boot.js?v=4"></script>
 </body>
 </html>
