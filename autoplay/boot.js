@@ -10,7 +10,7 @@
   'use strict';
 
   var POOL = [];                       // 关卡索引池（默认 0..19 = 前 20 关）
-  for (var p = 0; p < 20; p++) POOL.push(p);
+  for (var p = 0; p < 40; p++) POOL.push(p);
   var MODE = '文字';
   var LOOP = true;                     // 无终态，一直循环
   var running = false;
@@ -197,7 +197,7 @@
 
   function loadDriver(cb) {
     var sc = document.createElement('script');
-    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=8';
+    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=23';
     sc.onload = function () { cb(); };
     sc.onerror = function () { log('驱动加载失败'); };
     document.body.appendChild(sc);

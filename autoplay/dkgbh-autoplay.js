@@ -908,7 +908,8 @@
       var pick = cands[Math.min(tryIdx || 0, cands.length - 1)];
       return drag(pick.n, null, pick.d);
     }
-    if (type === 4) return longPress(a, typeof b === 'number' ? b : 800);
+    if (type === 4) return longPress(a, (typeof b === 'number' ? b : 800) + (tryIdx || 0) * 600);
+                                                          // 长按卡住就一次比一次按得久（Level39 第 27 手 800 不够、1200 成功）
     if (type === 5) return multiClick(a, typeof b === 'number' ? b : 3);
     return Promise.resolve(false);
   }
