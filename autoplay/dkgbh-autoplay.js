@@ -591,13 +591,15 @@
   }
 
   var lastAddAt = 0;
+  var addTimeAt = 0;      // 本局加时触发点：10~100 秒之间随机（每关抽一次，每次加时后再抽）
   // 剩余时间见底就点「加时」（走游戏自己的按钮 → btn_addTime → setCountdown(+120)）
   function maybeAddTime() {
     try {
       var t = state().timer;
       if (t == null) return false;
-      if (t > 100 || t < 10) return false;   // 剩余 <100 秒就加时（远山：可以一直加，别怕）
-      if (now() - lastAddAt < 3000) return false;
+      if (!addTimeAt) addTimeAt = Math.round(rand(10, 100));   // 每关随机定一个点（不是固定 100）
+      if (t > addTimeAt || t < 10) return false;               // 只剩不到 10 秒就不加了（死线保护）
+      if (now() - lastAddAt < 3000) return false;              // 3 秒内不重复点
       var btn = findByName('addTimeBtn');
       if (!btn) return false;
       lastAddAt = now();
@@ -614,7 +616,8 @@
         var pg = pageGame();
         if (pg && typeof pg.btn_addTime === 'function') pg.btn_addTime();
       }
-      log('add-time', t);
+      log('add-time', t, 'trigger<=' + addTimeAt);
+      addTimeAt = Math.round(rand(10, 100));   // 加完重抽：下一次又落在一个新的点
       return true;
     } catch (err) { return false; }
   }
@@ -704,6 +707,7 @@
       };
     },
     stop: function () { STOP = true; },
+    addTime: function () { return { addTimeAt: addTimeAt, lastAddAt: lastAddAt }; },
     levelComp: levelComp,
     pressNode: function (name) {
       var n = findByName(name);
@@ -929,6 +933,7 @@
 
   function playLevel(opts) {
     opts = opts || {};
+    addTimeAt = 0;                        // 新一关：加时触发点重新随机
     var maxStepMs = opts.maxStepMs || 12000;
     var retries = opts.retries || 4;
     var deadline = opts.deadlineMs || 600000;
