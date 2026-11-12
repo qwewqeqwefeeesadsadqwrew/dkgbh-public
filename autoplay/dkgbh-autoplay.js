@@ -1105,7 +1105,8 @@
       var lv0 = levelComp();
       hookSceneMethods(lv0);
       installMiniLv(lv0);                    // 装上 currentMiniLv（运行时字段）
-      wrongEnter(lv0 && lv0.node ? lv0.node.name : (opts.levelName || '?'));   // 每关 1~3 次拿错道具
+      var lvName = lv0 && lv0.node ? lv0.node.name : (opts.levelName || '');
+      wrongEnter(lvName || '?');   // 每关 1~3 次拿错道具
       // 用「开局观察」的空窗预加载下一关（不抢当前关的加载带宽）
       if (opts.nextIdx != null) {
         setTimeout(function () { preloadLevelBundle(opts.nextIdx); }, rand(3000, 5000));
@@ -1153,6 +1154,17 @@
             return null;
           }
           maybeAddTime();
+          // Level25 幽灵步骤：步骤表 step52 是重复的 ShaoZi→jiePanZi，
+          // 但 Level25.ts 的 ShaoZi 拖拽处理器只到 step51；step51 后游戏激活 ShaoZiYao，
+          // 实际下一手是 step53（ShaoZiYao→GuanZi）。这条没有游戏处理器，直接跳过。
+          if (lvName === 'Level25' && i === 52 && steps[52] && steps[53]) {
+            var s52 = steps[52], s53 = steps[53];
+            if (s52[1] && s52[1].name === 'ShaoZi' && s53[1] && s53[1].name === 'ShaoZiYao') {
+              log('skip-phantom-step', 'Level25 step52 ShaoZi->jiePanZi', '→ step53 ShaoZiYao->GuanZi');
+              try { g.tiptrue[52] = true; } catch (e) {}   // 只推进计数；游戏真值由 step53 的 completeOneTip 推动
+              i++;
+            }
+          }
           while (i < steps.length && g.tiptrue[i]) i++;
           if (i >= steps.length) {
             // 全部完成：等收尾演出 + GameWin（末步演出可能 10 秒以上，例：第 2 关盖章 8.1s）
