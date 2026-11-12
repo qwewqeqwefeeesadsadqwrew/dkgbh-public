@@ -248,13 +248,70 @@
     return function (t) { var s = t * t * (3 - 2 * t); return mix * s + (1 - mix) * Math.pow(t, pow); };
   }
 
+  // ---------- 起点/落点：正态偏中心 + 遮挡过滤（技能清单第 6 条） ----------
+  // 老内核只有「矩形内均匀撒点」，没有遮挡过滤；这里按 human-pacing 模板补齐：
+  // 24 个正态点 + 8 个均匀点，洗牌后取第一个不压住别的可触摸节点矩形的点。
+  function isRelated(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    var p = a; while (p) { if (p === b) return true; p = p.parent; }
+    p = b; while (p) { if (p === a) return true; p = p.parent; }
+    return false;
+  }
+  function blockersFor(node, target) {
+    var root = (levelComp() || {}).node || cc.director.getScene();
+    var out = [];
+    (function walk(n) {
+      if (!n || !n.isValid || !n.activeInHierarchy) return;
+      if (n !== node && n !== target && !isRelated(n, node) && !isRelated(n, target) && listens(n)) {
+        var b = boxOf(n);
+        if (b) out.push(b);
+      }
+      var ch = n.children || [];
+      for (var i = 0; i < ch.length; i++) walk(ch[i]);
+    })(root);
+    return out;
+  }
+  function pointBlocked(x, y, boxes) {
+    for (var i = 0; i < boxes.length; i++) {
+      var b = boxes[i];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true;
+    }
+    return false;
+  }
+  function pickPoint(n, spread, inset, target) {
+    if (!n) return { x: 0, y: 0 };
+    var boxes = blockersFor(n, target || null);
+    var cands = [];
+    for (var i = 0; i < 24; i++) {
+      var p = gaussPointInRect(n, spread == null ? 0.28 : spread);
+      if (p && !pointBlocked(p.x, p.y, boxes)) cands.push(p);
+    }
+    for (var j = 0; j < 8; j++) {
+      var q = randPointInRect(n, inset == null ? 0.12 : inset);
+      if (q && !pointBlocked(q.x, q.y, boxes)) cands.push(q);
+    }
+    for (var k = cands.length - 1; k > 0; k--) {
+      var r = Math.floor(Math.random() * (k + 1));
+      var t = cands[k]; cands[k] = cands[r]; cands[r] = t;
+    }
+    if (cands.length) return cands[0];
+    return gaussPointInRect(n, spread == null ? 0.28 : spread);   // 全被挡：退回正态点，别卡死
+  }
+
   // ---------- 动作（全部拟人：时长/按压/弧度/抖动/帧间隔/缓动/松手延迟都随机） ----------
   function click(n) {
-    var p = randPointInRect(n, 0.2);
-    p.x += rand(-2.2, 2.2); p.y += rand(-2.2, 2.2);           // 点击位置偏 ±2.2px
+    var p = pickPoint(n, 0.30, 0.12, null);                   // 正态偏中心 + 遮挡过滤
+    p.x += rand(-1.6, 1.6); p.y += rand(-1.6, 1.6);           // 点击位置再偏 ±1.6px
     emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
     var hold = rand(50, 180);                                  // 按下 50~180ms
-    return sleep(hold).then(function () {
+    return sleep(Math.round(hold * 0.35)).then(function () {
+      // 70% 概率中途发一次 TOUCH_MOVE（±2.2px，小于常见 8px 拖拽阈值）
+      if (Math.random() < 0.7) {
+        emit(n, cc.Node.EventType.TOUCH_MOVE, p.x + rand(-2.2, 2.2), p.y + rand(-2.2, 2.2));
+      }
+      return sleep(Math.round(hold * 0.65));
+    }).then(function () {
       emit(n, cc.Node.EventType.TOUCH_END, p.x, p.y);
       recordGesture({ type: 'tap', node: n.name, from: [Math.round(p.x), Math.round(p.y)], to: [Math.round(p.x), Math.round(p.y)], dur: Math.round(hold), press: Math.round(hold), curve: 0 });
       return hold;                                             // 返回动作时长给节奏用
@@ -266,7 +323,7 @@
       if (i++ >= times) return Promise.resolve(total);
       return click(n).then(function (d) {
         total += d;
-        var gap = rand(80, 350);                               // 组内连点 80~350ms
+        var gap = humanGap(160, 80, 420, 0.02);                // 连击间隔：对数正态，2% 长停顿
         total += gap;
         return sleep(gap).then(step);
       });
@@ -279,7 +336,7 @@
   function drag(n, target, mode, plan) {
     plan = plan || {};
     return new Promise(function (resolve) {
-      var a = randPointInRect(n, 0.12);                         // 起点：内缩 12% 随机
+      var a = pickPoint(n, 0.28, 0.12, target);                 // 起点：24 正态 + 8 均匀，避开遮挡
       var b;
       if (mode === 'up' || mode === 'down' || mode === 'left' || mode === 'right') {
         var baseLen = plan.len || 120;
@@ -307,7 +364,7 @@
       var dur = mode
         ? Math.min(700, Math.max(240, fittsDur(dist0, tgtW || 100) * 0.8))
         : fittsDur(dist0, tgtW || 80) * (0.85 + Math.random() * 0.3);
-      dur = clamp(dur, 240, 1500);
+      dur = clamp(dur, 240, 1400);
       var nx = -vy0 / dist0, ny = vx0 / dist0;
       var curveAmp = mode ? 0.05 : 0.12;
       var curve = rand(-curveAmp, curveAmp) * Math.min(dist0, 260);
@@ -393,15 +450,11 @@
     var p = randPointInRect(n, 0.2);
     var real = Math.max(300, hold || 800) + rand(100, 600);      // 多按一点，卡底线容易失败
     emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
-    var t0 = now();
-    // 按住期间每 120~260ms 微动一次（±3px）：真人按住手指不会完全静止（照掌勺）
-    (function jitter() {
-      if (now() - t0 >= real) return;
-      emit(n, cc.Node.EventType.TOUCH_MOVE, p.x + rand(-3, 3), p.y + rand(-3, 3));
-      setTimeout(jitter, rand(120, 260));
-    })();
+    // 本作长按判定会被 TOUCH_MOVE 打断（Level39 第 27 手实测）：这里不发微动，
+    // 只保留随机按住时长；技能里的「手指微抖」在这款游戏属于会破坏判定的动作。
     return sleep(real).then(function () {
       emit(n, cc.Node.EventType.TOUCH_END, p.x, p.y);
+      recordGesture({ type: 'hold', node: n.name, from: [Math.round(p.x), Math.round(p.y)], dur: Math.round(real), press: Math.round(real), curve: 0 });
       return real;
     });
   }
@@ -453,13 +506,102 @@
       })();
     });
   }
-  function longPress(n, hold) {
-    var p = randPt(n);
-    emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
-    return sleep(Math.max(300, hold || 800)).then(function () {
-      emit(n, cc.Node.EventType.TOUCH_END, p.x, p.y);
-      return true;
-    });
+
+  // ---------- 第 14 条：拿错道具（每关 1~3 次，(步骤,道具) 去重） ----------
+  // 依据：h5-autoplay-pipeline/references/human-pacing-full.md 阶段 4.6；
+  // 实现改写自 wlzs120/zlzs-autoplay-120.js 的 tryWrongPick（已实测 5 关 6 次、同一关 3 轮不重样）。
+  // 本作没有 currentSceneConfig，候选直接取 GuideManager._steps 里「当前步以后第 3 步起」的拖拽源。
+  var WKEY = 'dkgbhWrongHist';
+  var WRONG = { on: true, lv: null, hist: [], done: 0, max: 0, ticks: 0, cycles: 0, last: null };
+  function loadJ(k) { try { var o = JSON.parse(localStorage.getItem(k) || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (e) { return {}; } }
+  function saveJ(k, o) { try { localStorage.setItem(k, JSON.stringify(o)); } catch (e) {} }
+  function loadHist(lv) { var o = loadJ(WKEY), a = o[lv]; return Array.isArray(a) ? a : []; }
+  function saveHist(lv, arr) { if (arr.length > 600) arr.splice(0, arr.length - 600); var o = loadJ(WKEY); o[lv] = arr; saveJ(WKEY, o); }
+  function nodeKey(n) { try { return n && n.uuid ? n.uuid : (n && n.name) || ''; } catch (e) { return (n && n.name) || ''; } }
+  function wrongEnter(lvName) {
+    WRONG.lv = lvName || '?';
+    WRONG.hist = loadHist(WRONG.lv);
+    WRONG.done = 0;
+    WRONG.max = 1 + Math.floor(Math.random() * 3);          // 每关 1~3 次（平均 2 次）
+    WRONG.ticks = 2 + Math.floor(Math.random() * 4);        // 先做 2~5 个正常动作再错
+    WRONG.cycles = 0;
+    WRONG.last = null;
+    log('wrong-level', WRONG.lv, 'max=' + WRONG.max, 'ticks=' + WRONG.ticks, 'histN=' + WRONG.hist.length);
+  }
+  function wrongCandidates(steps, curI) {
+    var out = [];
+    if (!steps || curI < 0 || curI >= steps.length) return out;
+    var cur = steps[curI];
+    var curSrc = resolveNode(cur[1], cur[2] && cur[2].worldPosition ? cur[2] : null);
+    var curTgt = cur[2];
+    var grp = groupKey(curTgt || curSrc);
+    var used = {};
+    // 关键：避开当前步与后两步，防止「提前做了」推进 step（wlzs 实测 1/5 会推进）
+    for (var k = curI; k < Math.min(steps.length, curI + 3); k++) {
+      var s0 = steps[k]; if (!s0) continue;
+      if (s0[1]) used[nodeKey(s0[1])] = 1;
+      if (s0[2]) used[nodeKey(s0[2])] = 1;
+    }
+    for (var j = curI + 3; j < steps.length; j++) {
+      var s = steps[j]; if (!s) continue;
+      if (Number(s[0]) !== 2) continue;                     // 只拿可拖道具，点击/滑动不制造「拿错」
+      var n = resolveNode(s[1], s[2] && s[2].worldPosition ? s[2] : null);
+      if (!n || !n.isValid || !n.activeInHierarchy || n === curSrc || n === curTgt) continue;
+      if (used[nodeKey(n)]) continue;
+      if (!listens(n) || !boxOf(n)) continue;
+      if (grp && groupKey(n) !== grp) continue;             // 同一画面段，别拿别的段的道具
+      if (/^(back|bj|cj|pic|Page|UI|Btn|button|addTime|next|close|skip|Pop)/i.test(n.name)) continue;
+      var dup = false;
+      for (var q = 0; q < out.length; q++) if (out[q].node === n) { dup = true; break; }
+      if (!dup) out.push({ name: n.name, node: n });
+    }
+    return out;
+  }
+  function wrongDropPoint(ref, node) {
+    var rb = boxOf(ref) || boxOf(node);
+    if (!rb) return { x: 0, y: 0 };
+    var boxes = blockersFor(node, ref);
+    for (var i = 0; i < 16; i++) {
+      var ang = Math.random() * Math.PI * 2, dist = rand(100, 240);
+      var p = { x: rb.cx + Math.cos(ang) * dist, y: rb.cy + Math.sin(ang) * dist };
+      if (p.x < 30 || p.x > 720 || p.y < 100 || p.y > 1500) continue;
+      if (!pointBlocked(p.x, p.y, boxes)) return p;
+    }
+    return { x: rb.cx, y: rb.cy - 160 };                     // 全被挡：拖到目标上方空地
+  }
+  function tryWrongPick(steps, curI) {
+    if (!WRONG.on) return false;
+    if (curI < 2) return false;                            // 前 2 步不碰
+    if (!steps || curI >= steps.length) return false;
+    if (Number(steps[curI][0]) !== 2) return false;        // 只对拖拽步拿错
+    if (WRONG.done >= WRONG.max) return false;
+    if (WRONG.ticks > 0) { WRONG.ticks--; return false; }
+    var cands = wrongCandidates(steps, curI);
+    if (!cands.length) { WRONG.ticks = 1; return false; }  // 这会儿没有可错道具，下次再试
+    var stepNo = curI + 1;
+    var fresh = cands.filter(function (c) { return WRONG.hist.indexOf(stepNo + ':' + c.name) < 0; });
+    var pool2;
+    if (fresh.length) pool2 = fresh;
+    else {
+      WRONG.cycles++;
+      if (WRONG.cycles < 6) { WRONG.ticks = 1; return false; }   // 先等，别直接清历史（清了就重复）
+      WRONG.hist.length = 0;
+      saveHist(WRONG.lv, WRONG.hist);
+      WRONG.cycles = 0;
+      pool2 = cands;
+    }
+    var pick = pool2[Math.floor(Math.random() * pool2.length)];
+    var target = steps[curI][2];
+    if (!target || !target.worldPosition) return false;
+    WRONG.hist.push(stepNo + ':' + pick.name);
+    saveHist(WRONG.lv, WRONG.hist);
+    WRONG.done++;
+    WRONG.cycles = 0;                                      // 错成功也清零，不能带入下一关
+    WRONG.ticks = 2 + Math.floor(Math.random() * 4);
+    WRONG.last = { step: stepNo, node: pick.name, at: now() };
+    var dest = wrongDropPoint(target, pick.node);
+    log('WRONGPICK', pick.name, 'step' + stepNo, 'lv' + WRONG.lv, 'done=' + WRONG.done + '/' + WRONG.max, 'to=' + Math.round(dest.x) + ',' + Math.round(dest.y));
+    return drag(pick.node, target, null, { pt: dest, fit: null });   // 拖到空地，不占当前目标位
   }
 
   // ---------- 读关卡状态 ----------
@@ -591,15 +733,21 @@
   }
 
   var lastAddAt = 0;
-  var addTimeAt = 0;      // 本局加时触发点：10~100 秒之间随机（每关抽一次，每次加时后再抽）
+  var addTimeAt = 0;      // 本关加时触发点：10~50 秒随机（每次加时后重抽，次数不清零）
+  var addTimeTimes = 0;   // 本关已加时次数（技能第 15 条：每关最多 3 次）
+  var ADD_TIME_MAX = 3;
   // 剩余时间见底就点「加时」（走游戏自己的按钮 → btn_addTime → setCountdown(+120)）
   function maybeAddTime() {
     try {
       var t = state().timer;
       if (t == null) return false;
-      if (!addTimeAt) addTimeAt = Math.round(rand(10, 100));   // 每关随机定一个点（不是固定 100）
-      if (t > addTimeAt || t < 10) return false;               // 只剩不到 10 秒就不加了（死线保护）
-      if (now() - lastAddAt < 3000) return false;              // 3 秒内不重复点
+      if (!addTimeAt) {
+        addTimeAt = 10 + Math.random() * 40;                 // 10~50 秒随机，不是固定 100
+        log('addtime-plan@' + addTimeAt.toFixed(1) + 's');
+      }
+      if (addTimeTimes >= ADD_TIME_MAX) return false;        // 每关最多 3 次
+      if (t > addTimeAt || t < 10) return false;             // 只剩不到 10 秒就不加了（死线保护）
+      if (now() - lastAddAt < 3000) return false;            // 3 秒内不重复点
       var btn = findByName('addTimeBtn');
       if (!btn) return false;
       lastAddAt = now();
@@ -616,8 +764,10 @@
         var pg = pageGame();
         if (pg && typeof pg.btn_addTime === 'function') pg.btn_addTime();
       }
-      log('add-time', t, 'trigger<=' + addTimeAt);
-      addTimeAt = Math.round(rand(10, 100));   // 加完重抽：下一次又落在一个新的点
+      addTimeTimes++;
+      log('addtime@plan' + addTimeAt.toFixed(1), 'left' + t, '(' + addTimeTimes + '/' + ADD_TIME_MAX + ')');
+      addTimeAt = 10 + Math.random() * 40;                   // 加完重抽：下一次又落在一个新的点
+      log('addtime-plan@' + addTimeAt.toFixed(1) + 's');
       return true;
     } catch (err) { return false; }
   }
@@ -703,11 +853,13 @@
       return {
         level: st.level, timer: st.timer, tips: st.tips,
         gestures: GESTURES.slice(),
-        lastGesture: GESTURES.length ? GESTURES[GESTURES.length - 1] : null
+        lastGesture: GESTURES.length ? GESTURES[GESTURES.length - 1] : null,
+        wrong: { done: WRONG.done, max: WRONG.max, ticks: WRONG.ticks, lv: WRONG.lv, histN: WRONG.hist.length, last: WRONG.last },
+        addTime: { at: addTimeAt, times: addTimeTimes, max: ADD_TIME_MAX }
       };
     },
     stop: function () { STOP = true; },
-    addTime: function () { return { addTimeAt: addTimeAt, lastAddAt: lastAddAt }; },
+    addTime: function () { return { addTimeAt: addTimeAt, lastAddAt: lastAddAt, times: addTimeTimes, max: ADD_TIME_MAX }; },
     levelComp: levelComp,
     pressNode: function (name) {
       var n = findByName(name);
@@ -934,6 +1086,7 @@
   function playLevel(opts) {
     opts = opts || {};
     addTimeAt = 0;                        // 新一关：加时触发点重新随机
+    addTimeTimes = 0;                     // 新一关：加时次数清零（技能第 15 条）
     var maxStepMs = opts.maxStepMs || 12000;
     var retries = opts.retries || 4;
     var deadline = opts.deadlineMs || 600000;
@@ -952,18 +1105,27 @@
       var lv0 = levelComp();
       hookSceneMethods(lv0);
       installMiniLv(lv0);                    // 装上 currentMiniLv（运行时字段）
+      wrongEnter(lv0 && lv0.node ? lv0.node.name : (opts.levelName || '?'));   // 每关 1~3 次拿错道具
       // 用「开局观察」的空窗预加载下一关（不抢当前关的加载带宽）
       if (opts.nextIdx != null) {
         setTimeout(function () { preloadLevelBundle(opts.nextIdx); }, rand(3000, 5000));
       }
-      // 开局观察 3~5 秒（照掌勺 beginIntro：刚进关立刻拖会读到未渲染完的位置，也不像人）
-      var introMs = opts.introMs != null ? opts.introMs : (3000 + Math.random() * 2000);
+      // 开局观察：对数正态 4.2s 中位（2.6~9s），不是均匀 3~5 秒
+      var introMs = opts.introMs != null ? opts.introMs : humanGap(4200, 2600, 9000, 0.03);
       var tReady = now();
       log('intro-start', 'readyAfter=' + Math.round((tReady - t0) / 1000) + 's', 'intro=' + Math.round(introMs) + 'ms');
       return sleep(introMs).then(function () {
         log('intro-end', 'total=' + Math.round((now() - t0) / 1000) + 's');
-        var i = 0, actMs = 0, lastRepeat = false;
+        var i = 0, actMs = 0, carryTail = 0;
         var lastMini = null, lastStep = -1, lastGroup = null, useFieldMode = true;
+        var lastProgressAt = now(), lastSeenI = -1, lastSeenDone = -1;
+        function trackProgress() {
+          var doneNow = 0;
+          try { for (var k = 0; k < (g.tiptrue || []).length; k++) if (g.tiptrue[k]) doneNow++; } catch (e) {}
+          if (i !== lastSeenI || doneNow !== lastSeenDone) {
+            lastSeenI = i; lastSeenDone = doneNow; lastProgressAt = now();
+          }
+        }
         // 进关基线：把「当前段」先标记成会动的层（否则第一次换段判不出来）
         (function markCurrentSeg() {
           try {
@@ -984,6 +1146,12 @@
           if (now() - t0 > deadline) { reason = 'timeout'; return null; }
           if (popShown('PopVictory')) { reason = 'win'; return null; }
           if (popShown('PopFail')) { reason = 'lose'; return null; }
+          trackProgress();
+          if (now() - lastProgressAt > 30000) {              // 技能第 24 条：30 秒无进度 → 换下一关
+            log('stall-giveup', 'no-progress-30s', 'step=' + i);
+            reason = 'stall-giveup';
+            return null;
+          }
           maybeAddTime();
           while (i < steps.length && g.tiptrue[i]) i++;
           if (i >= steps.length) {
@@ -1022,21 +1190,22 @@
             if (nameChanged) { miniChanged = true; log('seg-name', grp); }
           }
           var sameGroup = !miniChanged && (stepNow === lastStep);
-          var isRepeat = (lastRepeat && stepNow === lastStep);
           var gap;
-          // 四档间隔全部用「对数正态」（真人节奏：大量中等间隔 + 少数长停顿）
-          if (isRepeat) gap = humanGap(160, 80, 420, 0.02);
-          else if (sameGroup) gap = humanGap(520, 250, 1100, 0.03);
+          // 间隔全部用「对数正态」（真人节奏：大量中等间隔 + 少数长停顿）
+          // 连击档在 multiClick() 里；同组重试档在 attempt() 的重试前。
+          if (sameGroup) gap = humanGap(520, 250, 1100, 0.03);
           else if (miniChanged) gap = humanGap(4200, 2600, 9000, 0.03);   // 换画面段：中位 4.2s，偶尔看十几秒
           else gap = humanGap(1800, 900, 4200, 0.05);                      // 同段换步骤：中位 1.8s
           var prevMini = lastMini;                 // 留给日志用（更新前的值）
           if (miniNow !== null && miniNow >= 0) lastMini = miniNow;
           lastGroup = grp;
           lastStep = stepNow;
+          var waitGap = Math.max(carryTail || 0, gap);     // 照掌勺：max(动画余量, 下一拍 gap)，不是相加
+          carryTail = 0;
           var pre = Promise.resolve();
-          if (gap > 1200) {
-            log('gap', 'mini=' + miniNow + '(prev=' + prevMini + ')', 'step=' + stepNow, Math.round(gap) + 'ms');
-            pre = sleep(gap);
+          if (waitGap > 1200) {
+            log('gap', 'mini=' + miniNow + '(prev=' + prevMini + ')', 'step=' + stepNow, Math.round(waitGap) + 'ms');
+            pre = sleep(waitGap);
           }
           var tries = 0;
           var t2 = Number(step[0]);
@@ -1048,6 +1217,12 @@
             if (STOP) { reason = 'stopped'; return null; }
             if (now() - t0 > deadline) { reason = 'timeout'; return null; }
             if (popShown('PopVictory')) { reason = 'win'; return null; }
+            trackProgress();
+            if (now() - lastProgressAt > 30000) {              // 30 秒零进度 → 换下一关，绝不重进
+              log('stall-giveup', 'no-progress-30s', 'step=' + i);
+              reason = 'stall-giveup';
+              return null;
+            }
             if (!node || !node.isValid) { i++; return next(); }
             tries++;
             // 发动作前先对齐到已知状态：关卡的 eventLock（演出/动画期间）关掉再动手
@@ -1055,28 +1230,45 @@
               var lv = levelComp();
               return !(lv && lv.eventLock && lv.eventLock.active);
             }, 10000, 80).then(function () {
-              return execStep(step, tries - 1).then(function (d) { actMs = d || 0; if (tries === 1) hideDebugHud(); });
-            }).then(function () {
+              // 第 14 条：先看要不要拿错道具（只对拖拽步；错完等游戏弹回，再做正常步）
+              var wp = false;
+              try { wp = tryWrongPick(steps, i); } catch (e) { log('wrong-err', String(e).slice(0, 80)); }
+              if (wp) {
+                return wp.then(function () {
+                  return sleep(humanGap(1800, 1000, 3400, 0.04));
+                }).then(function () {
+                  return next();
+                }).then(function () {
+                  return { stop: true };
+                });
+              }
+              return execStep(step, tries - 1).then(function (d) {
+                actMs = d || 0;
+                if (tries === 1) hideDebugHud();
+                return { stop: false };
+              });
+            }).then(function (wr) {
+              if (wr && wr.stop) return null;
               return waitFor(function () { return g.tiptrue[i] || !!popShown('PopVictory') || !!popShown('PopFail'); }, waitMs, 120);
             }).then(function (r2) {
-              if (r2.ok) {
-                // 节奏：换组 1000~3000ms，同组 250~900ms；下限不许抢在动画前面
-                // 照掌勺：等 = max(动画时长 + 650 + rand(0,350), 下一拍的 gap)
-                // （下一拍的 gap 已在 next() 入口按 sameGroup/换段算好，这里只做安全余量）
-                var tail = Math.max((actMs || 0) + 650 + Math.random() * 350, 0);
+              if (r2 && r2.ok) {
+                // 照掌勺：下一拍等 = max(动画时长 + 650 + rand(0,350), 下一拍的 gap)
+                carryTail = (actMs || 0) + 650 + Math.random() * 350;
                 actMs = 0;
                 i++;
-                return sleep(tail).then(next);
+                return next();
               }
               if (tries >= maxTry) {
-                log('step-stuck', i, 'type', step[0], node && node.name);
-                i++;
-                return next();
+                log('stall-giveup', 'step-stuck', 'step=' + i, 'type', step[0], node && node.name);
+                reason = 'stall-giveup';                       // 技能第 24 条：跳下一关，不重进
+                return null;
               }
               return waitFor(function () {
                 var lv = levelComp();
                 return !(lv && lv.eventLock && lv.eventLock.active);
-              }, 8000, 120).then(attempt);
+              }, 8000, 120).then(function () {
+                return sleep(humanGap(520, 250, 1100, 0.03));  // 同组重试档
+              }).then(attempt);
             });
           }
           return pre.then(function () { return attempt(); });
@@ -1093,6 +1285,18 @@
     });
   }
 
+  // 换关前先关认识的弹窗（技能第 20 条）；胜利面板要等「看结算」停顿结束后再关
+  // 第 17 条说明：本作结算面板的「下一关」按钮走游戏固定顺序，和洗牌队列冲突；
+  // 按技能第 17 条的例外，改用 enter(idx) 指定关号，不点面板按钮。
+  // 面板本身仍会先停留 1.2~3 秒（第 16 条），观众看得到结算。
+  function closePopups() {
+    var names = ['PopVictory', 'PopFail', 'PopLoad', 'PopAd', 'PopReward', 'PopSign', 'PopShare', 'PopTips'];
+    for (var i = 0; i < names.length; i++) {
+      var n = popShown(names[i]);
+      if (n) { try { app().manager.ui.hide({ name: names[i] }); } catch (e) {} }
+    }
+  }
+
   // 按给定顺序列表连打（洗牌轮换用）
   function runList(list, opts) {
     opts = opts || {};
@@ -1104,12 +1308,11 @@
       var r0;
       return Promise.resolve()
         .then(function () {
-          if (popShown('PopVictory')) { try { app().manager.ui.hide({ name: 'PopVictory' }); } catch (e) {} }
-          if (popShown('PopFail')) { try { app().manager.ui.hide({ name: 'PopFail' }); } catch (e) {} }
-          return sleep(rand(287, 913));
+          closePopups();
+          return sleep(humanGap(650, 350, 1200, 0.03));   // 收弹窗 0.35~1.2s（第 20 条）
         })
         .then(function () { return root.__AUTO.enter(idx, opts.mode); })
-        .then(function () { return sleep(rand(800, 1800)); })
+        .then(function () { return sleep(humanGap(900, 500, 1500, 0.03)); })   // 切关动画不动手（第 19 条）
         .then(function () {
           var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
           o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
@@ -1117,17 +1320,17 @@
         })
         .then(function (r) {
           if (r && (r.reason === 'not-ready' || r.reason === 'no-steps')) {
-            // 首次进关可能比引擎就绪还早：退回去重进一次
+            // 首次进关可能比引擎就绪还早：退回去重进一次（这是加载失败，不是卡关，允许一次）
             log('retry-enter', idx, r.reason);
-            if (popShown('PopLoad')) { try { app().manager.ui.hide({ name: 'PopLoad' }); } catch (e) {} }
-            return sleep(rand(1931, 3617))
+            closePopups();
+            return sleep(humanGap(2200, 1500, 3600, 0.03))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
-              .then(function () { return sleep(rand(2411, 4087)); })
+              .then(function () { return sleep(humanGap(1800, 1100, 3000, 0.03)); })
               .then(function () {
-          var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
-          o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
-          return playLevel(o2);
-        });
+                var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
+                o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;
+                return playLevel(o2);
+              });
           }
           return r;
         })
@@ -1137,9 +1340,11 @@
           results.push(r0);
           log('LEVEL', idx, r0.reason, r0.tips);
           k++;
-          return sleep(rand(2137, 3929));   // 打完看结算的自然停顿
-        })
-        .then(one);
+          // 第 16 条：胜利面板出现后先看 1.2~3 秒；非胜利也停 0.9~1.8 秒再切
+          var pause = (r0.reason === 'win') ? humanGap(1800, 1200, 3000, 0.05) : humanGap(1200, 900, 1800, 0.03);
+          log('level-pause', Math.round(pause) + 'ms', r0.reason);
+          return sleep(pause).then(one);
+        });
     }
     return one();
   }

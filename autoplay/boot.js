@@ -14,6 +14,30 @@
   var MODE = '文字';
   var LOOP = true;                     // 无终态，一直循环
   var running = false;
+  // boot 自己的地址：本地测试 / GitHub Pages / 镜像站都能据此找到同目录驱动
+  var SCRIPT_SRC = '';
+  try { SCRIPT_SRC = (document.currentScript && document.currentScript.src) || ''; } catch (e) {}
+  function driverSrc() {
+    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=24');
+    var base = (location.pathname.indexOf('/dkgbh-public/') >= 0)
+      ? location.origin + '/dkgbh-public/'
+      : location.origin + '/';
+    return base + 'autoplay/dkgbh-autoplay.js?v=24';
+  }
+
+  // ---------- 拟人节奏（与驱动同公式；只用于轮间停顿） ----------
+  function gauss() {
+    var u1 = Math.random() || 1e-9, u2 = Math.random();
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  }
+  function humanGap(medMs, minMs, maxMs, pauseRate) {
+    var v = Math.exp(Math.log(medMs) + 0.42 * gauss());
+    v = Math.min(maxMs, Math.max(minMs, v));
+    if (Math.random() < (pauseRate == null ? 0.04 : pauseRate)) {
+      v = Math.min(v * (2 + Math.random() * 1.5), maxMs * 2.5);
+    }
+    return v;
+  }
 
   // ---------- 洗牌 ----------
   function shuffle(a) {
@@ -40,7 +64,7 @@
   function newQueue(pool, prevLast) {
     for (var tries = 0; tries < 500; tries++) {
       var q = shuffle(pool);
-      if (prevLast != null && q[0] === prevLast) continue;
+      if (q.length > 1 && prevLast != null && q[0] === prevLast) continue;
       if (history.indexOf(q.join(',')) >= 0) continue;
       return q;
     }
@@ -152,7 +176,7 @@
       log('第 ' + DEMO.round + ' 轮结束：' + wins + '/' + (results ? results.length : 0) + ' 胜');
       DEMO.state = 'round-end';
       if (!LOOP) return log('不循环，停在此处');
-      setTimeout(playRound, 3000 + Math.random() * 2000);
+      setTimeout(playRound, humanGap(5000, 3000, 8000, 0.1));   // 第 18 条：跨轮多停 3~8 秒
     })['catch'](function (e) {
       log('本轮异常：' + e);
       DEMO.state = 'error';
@@ -197,7 +221,7 @@
 
   function loadDriver(cb) {
     var sc = document.createElement('script');
-    sc.src = 'https://qwewqeqwefeeesadsadqwrew.github.io/dkgbh-public/autoplay/dkgbh-autoplay.js?v=25';
+    sc.src = driverSrc();
     sc.onload = function () { cb(); };
     sc.onerror = function () { log('驱动加载失败'); };
     document.body.appendChild(sc);
