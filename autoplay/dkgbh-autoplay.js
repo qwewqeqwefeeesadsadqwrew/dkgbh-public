@@ -177,6 +177,56 @@
 
   function now() { return Date.now(); }
 
+  // ---------- 试验：随机多段拖动路径（?pathTest=1 开启，默认关闭，不影响交付） ----------
+  // 动机：原来的单峰 sin 侧弯 ±0.12×min(dist,260)（最多 ±31px），对 300~400px 的拖动
+  // 只剩约 8% 侧偏，看起来接近直线。这里改成 2~3 段随机钟形控制点叠加，
+  // 幅度上限 18% 位移，首尾用 sin 归零，每次拖动形状都不同。
+  // 默认开启（远山 2026-11-13 定稿）；需要回到直线模式用 ?pathTest=0
+  var PATH_TEST = (function () {
+    try {
+      if (/[?&]pathTest=0(&|$)/.test(String(location.search || ''))) return false;
+      return true;
+    } catch (e) { return true; }
+  })();
+  function makePathPts() {
+    var pts = [];
+    for (var attempt = 0; attempt < 20; attempt++) {
+      var n = 2 + Math.floor(Math.random() * 2);          // 2~3 个控制点
+      pts = [];
+      for (var i = 1; i <= n; i++) {
+        var s = i / (n + 1) + rand(-0.07, 0.07);
+        s = Math.min(0.88, Math.max(0.12, s));
+        pts.push({
+          s: s,
+          a: rand(0.16, 0.26) * (Math.random() < 0.5 ? -1 : 1),
+          w: rand(0.16, 0.26)
+        });
+      }
+      // 峰值不足 20% 就重抽：多个控制点可能互相抵消，不能让变回直线（远山定 20%+）
+      // 注意要乘 sin(πt) 再比：实际轨迹两端会被 arc 衰减，不乘就会高估
+      var peak = 0;
+      for (var k = 1; k < 20; k++) {
+        var t = k / 20, arc = Math.sin(Math.PI * t), v = 0;
+        for (var j = 0; j < pts.length; j++) {
+          var d = (t - pts[j].s) / pts[j].w;
+          v += pts[j].a * Math.exp(-d * d);
+        }
+        v = Math.abs(v * arc);
+        if (v > peak) peak = v;
+      }
+      if (peak >= 0.20) return pts;
+    }
+    return pts;                                           // 20 次都不到 20%：用最后一次，不无限循环
+  }
+  function pathOffset(t, pts) {
+    var o = 0;
+    for (var i = 0; i < pts.length; i++) {
+      var d = (t - pts[i].s) / pts[i].w;
+      o += pts[i].a * Math.exp(-d * d);
+    }
+    return Math.max(-0.30, Math.min(0.30, o));         // 总侧偏封顶 30% 位移（远山 2026-11-13 定：20% 以上）
+  }
+
   // ---------- 手势记录（照掌勺：用来证明「随机真的在生效」看 dur / curve 两列） ----------
   var GESTURES = [];
   function recordGesture(g) {
@@ -371,6 +421,8 @@
       var jitter = rand(0.4, 2.2), freq = rand(2, 4.5), phase = rand(0, 6.28);
       var ease = makeEase();
       var cur = { x: a.x, y: a.y };
+      var track = [];                                     // 试验：拖动轨迹采样（每 ~8% 一点）
+      var lastSample = -1;
       var fixRound = 0;
 
       emit(n, cc.Node.EventType.TOUCH_START, a.x, a.y);
@@ -380,13 +432,19 @@
         var ddx = to.x - from.x, ddy = to.y - from.y;
         var d2 = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
         var pnx = setN(-ddy / d2), pny = setN(ddx / d2);
+        var pts = PATH_TEST ? makePathPts() : null;      // 试验：本次拖动的随机路径形状
         (function step() {
           var t = Math.min(1, (now() - t0) / ms);
           var e = ease(t), arc = Math.sin(Math.PI * t);
           var wob = Math.sin(Math.PI * t * freq + phase) * arc;
-          var x = from.x + ddx * e + pnx * (curve * arc + jitter * wob);
-          var y = from.y + ddy * e + pny * (curve * arc + jitter * wob);
+          var lat = pts ? (pathOffset(t, pts) * dist0 * arc) : (curve * arc);
+          var x = from.x + ddx * e + pnx * (lat + jitter * wob);
+          var y = from.y + ddy * e + pny * (lat + jitter * wob);
           cur = { x: x, y: y };
+          if (PATH_TEST) {
+            var si = Math.floor(t * 8);
+            if (si !== lastSample) { lastSample = si; track.push([Math.round(x), Math.round(y)]); }
+          }
           emit(n, cc.Node.EventType.TOUCH_MOVE, x, y);
           if (t < 1) return setTimeout(step, rand(12, 22));      // 帧间隔 12~22ms
           onDone();
@@ -438,7 +496,8 @@
             from: [Math.round(a.x), Math.round(a.y)],
             to: [Math.round(cur.x), Math.round(cur.y)],
             dur: Math.round(dur), press: Math.round(pressMs),
-            curve: Math.round(curve), round: fixRound
+            curve: Math.round(curve), round: fixRound,
+            path: PATH_TEST ? track.slice() : undefined
           });
           resolve(pressMs + dur + rel);                          // 返回动作总时长
         }, rand(0, 120));
