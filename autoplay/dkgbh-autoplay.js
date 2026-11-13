@@ -437,7 +437,8 @@
           var t = Math.min(1, (now() - t0) / ms);
           var e = ease(t), arc = Math.sin(Math.PI * t);
           var wob = Math.sin(Math.PI * t * freq + phase) * arc;
-          var lat = pts ? (pathOffset(t, pts) * dist0 * arc) : (curve * arc);
+          // 只有拖拽（mode 为空）用随机曲线；滑动保持原来的小弧度——滑动可能被游戏按方向/直线度判定
+          var lat = (pts && !mode) ? (pathOffset(t, pts) * dist0 * arc) : (curve * arc);
           var x = from.x + ddx * e + pnx * (lat + jitter * wob);
           var y = from.y + ddy * e + pny * (lat + jitter * wob);
           cur = { x: x, y: y };
