@@ -9,6 +9,27 @@
 (function () {
   'use strict';
 
+  // ---- 自动刷新保险（2026-11-14 黛西加，治「跑几小时浏览器崩溃」）----
+  // 为什么：自动玩每关会预载下一关的整包资源；那一关没玩到（卡住/跳过）就留在内存里，
+  //   加上浏览器自身长时间运行的累积，实测 15 分钟资源 243→1752、进程 873→1394MB，
+  //   几小时后可能把浏览器撑崩。清理包会和自动玩的预载标记打架（实测 2.8 万个报错），
+  //   所以先上这个零风险保险：到点整页刷新，所有累积清零。
+  // 用法：?refresh=45（分钟，0=关闭，默认 45；上限 720）。
+  //   刷新后自动玩会按历史去重继续洗牌，中断约 10 秒。
+  (function autoRefreshGuard() {
+    try {
+      var qs = new URLSearchParams(location.search);
+      var raw = qs.get('refresh');
+      var n = raw == null ? 45 : Number(raw);
+      if (!(n > 0)) return;
+      n = Math.min(n, 720);
+      setTimeout(function () {
+        try { console.log('[boot] refresh-guard ' + n + ' 分钟到，刷新清零'); } catch (e) {}
+        try { location.reload(); } catch (e) {}
+      }, n * 60000);
+    } catch (e) {}
+  })();
+
   var POOL = [];                       // 关卡索引池（0..39 = 前 40 关）
   for (var p = 0; p < 40; p++) POOL.push(p);
   var MODE = '文字';
