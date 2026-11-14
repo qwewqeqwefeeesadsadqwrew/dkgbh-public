@@ -39,11 +39,11 @@
   var SCRIPT_SRC = '';
   try { SCRIPT_SRC = (document.currentScript && document.currentScript.src) || ''; } catch (e) {}
   function driverSrc() {
-    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=24');
+    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=25');
     var base = (location.pathname.indexOf('/dkgbh-public/') >= 0)
       ? location.origin + '/dkgbh-public/'
       : location.origin + '/';
-    return base + 'autoplay/dkgbh-autoplay.js?v=24';
+    return base + 'autoplay/dkgbh-autoplay.js?v=25';
   }
 
   // ---------- 拟人节奏（与驱动同公式；只用于轮间停顿） ----------
