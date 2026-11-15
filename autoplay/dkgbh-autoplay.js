@@ -316,7 +316,7 @@
     v = clamp(v, minMs, maxMs);
     if (Math.random() < (pauseRate == null ? 0.04 : pauseRate)) {
       v = v * (2 + Math.random() * 1.5);        // 思考停顿：2~3.5 倍（真人会接电话/看提示）
-      v = Math.min(v, maxMs * 2.5);             // 但封顶，别把关卡拖到超时
+      v = Math.min(v, maxMs);             // 但封顶，别把关卡拖到超时
     }
     return v;
   }
