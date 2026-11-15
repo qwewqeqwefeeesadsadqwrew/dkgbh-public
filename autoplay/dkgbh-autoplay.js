@@ -955,7 +955,8 @@
     var found = null;
     (function walk(n) {
       if (found || !n) return;
-      if (n.name === name && n.activeInHierarchy && n.parent && n.parent.name === 'Pop') { found = n; return; }
+      // 面板可能挂在 Pop 下，也可能直接在 UserInterface 下：名字匹配 + 激活即算（2026-11-15 放宽）
+      if (n.name === name && n.activeInHierarchy) { found = n; return; }
       var ch = n.children || [];
       for (var k = 0; k < ch.length; k++) walk(ch[k]);
     })(cc.director.getScene());
