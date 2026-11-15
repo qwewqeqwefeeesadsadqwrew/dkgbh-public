@@ -414,7 +414,7 @@
     var p = pickPoint(n, 0.30, 0.12, null);                   // 正态偏中心 + 遮挡过滤
     p.x += rand(-1.6, 1.6); p.y += rand(-1.6, 1.6);           // 点击位置再偏 ±1.6px
     emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
-    var hold = rand(50, 180);                                  // 按下 50~180ms
+    var hold = rand(60, 160);                                  // 按下 60~160ms（技能参数表）
     return sleep(Math.round(hold * 0.35)).then(function () {
       // 70% 概率中途发一次 TOUCH_MOVE（±2.2px，小于常见 8px 拖拽阈值）
       if (Math.random() < 0.7) {
@@ -433,7 +433,7 @@
       if (i++ >= times) return Promise.resolve(total);
       return click(n).then(function (d) {
         total += d;
-        var gap = humanGap(160, 80, 420, 0.02);                // 连击间隔：对数正态，2% 长停顿
+        var gap = humanGap(160, 80, 350, 0.02);                // 连击间隔 80~350ms（技能口径）
         total += gap;
         return sleep(gap).then(step);
       });
@@ -465,16 +465,16 @@
         b = a;
       }
 
-      var pressMs = mode ? rand(30, 150) : rand(40, 180);       // 按下停顿
+      var pressMs = mode ? rand(40, 140) : rand(50, 180);       // 按下停顿（滑动 40~140 / 拖拽 50~180，技能口径）
       var vx0 = b.x - a.x, vy0 = b.y - a.y;
       var dist0 = Math.sqrt(vx0 * vx0 + vy0 * vy0) || 1;
       var tgtW = 0;
       try { var tb = target ? boxOf(target) : null; tgtW = tb ? Math.min(tb.w, tb.h) : 0; } catch (e) {}
       // 时长 = Fitts 定律（距离/目标宽度），乘一个 0.85~1.15 的个体差
       var dur = mode
-        ? Math.min(700, Math.max(240, fittsDur(dist0, tgtW || 100) * 0.8))
+        ? Math.min(600, Math.max(300, fittsDur(dist0, tgtW || 100) * 0.8))
         : fittsDur(dist0, tgtW || 80) * (0.85 + Math.random() * 0.3);
-      dur = clamp(dur, 240, 1400);
+      dur = clamp(dur, 350, 750);   // 技能：拖拽 350~750ms
       var nx = -vy0 / dist0, ny = vx0 / dist0;
       var curveAmp = mode ? 0.05 : 0.12;
       var curve = rand(-curveAmp, curveAmp) * Math.min(dist0, 260);
@@ -568,7 +568,7 @@
 
   function longPress(n, hold) {
     var p = randPointInRect(n, 0.2);
-    var real = Math.max(300, hold || 800) + rand(100, 600);      // 多按一点，卡底线容易失败
+    var real = Math.max(300, hold || 800) + rand(150, 500);      // 长按余量 +150~500ms（技能口径）
     emit(n, cc.Node.EventType.TOUCH_START, p.x, p.y);
     // 本作长按判定会被 TOUCH_MOVE 打断（Level39 第 27 手实测）：这里不发微动，
     // 只保留随机按住时长；技能里的「手指微抖」在这款游戏属于会破坏判定的动作。
@@ -1344,9 +1344,9 @@
           var gap;
           // 间隔全部用「对数正态」（真人节奏：大量中等间隔 + 少数长停顿）
           // 连击档在 multiClick() 里；同组重试档在 attempt() 的重试前。
-          if (sameGroup) gap = humanGap(520, 250, 1100, 0.03);
-          else if (miniChanged) gap = humanGap(4200, 2600, 9000, 0.03);   // 换画面段：中位 4.2s，偶尔看十几秒
-          else gap = humanGap(1800, 900, 4200, 0.05);                      // 同段换步骤：中位 1.8s
+          if (sameGroup) gap = humanGap(520, 250, 900, 0.03);
+          else if (miniChanged) gap = humanGap(1800, 1000, 3000, 0.03);   // 换画面段（组间 1000~3000，技能口径）
+          else gap = humanGap(1800, 1000, 3000, 0.05);                      // 同段换步骤（组间 1000~3000，技能口径）
           var prevMini = lastMini;                 // 留给日志用（更新前的值）
           if (miniNow !== null && miniNow >= 0) lastMini = miniNow;
           lastGroup = grp;
@@ -1386,7 +1386,7 @@
               try { wp = tryWrongPick(steps, i); } catch (e) { log('wrong-err', String(e).slice(0, 80)); }
               if (wp) {
                 return wp.then(function () {
-                  return sleep(humanGap(1800, 1000, 3400, 0.04));
+                  return sleep(humanGap(1800, 1000, 3000, 0.04));
                 }).then(function () {
                   return next();
                 }).then(function () {
@@ -1418,7 +1418,7 @@
                 var lv = levelComp();
                 return !(lv && lv.eventLock && lv.eventLock.active);
               }, 8000, 120).then(function () {
-                return sleep(humanGap(520, 250, 1100, 0.03));  // 同组重试档
+                return sleep(humanGap(520, 250, 900, 0.03));  // 同组重试档
               }).then(attempt);
             });
           }
@@ -1474,7 +1474,7 @@
             // 首次进关可能比引擎就绪还早：退回去重进一次（这是加载失败，不是卡关，允许一次）
             log('retry-enter', idx, r.reason);
             closePopups();
-            return sleep(humanGap(2200, 1500, 3600, 0.03))
+            return sleep(humanGap(2000, 1000, 3000, 0.03))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
               .then(function () { return sleep(humanGap(1800, 1100, 3000, 0.03)); })
               .then(function () {
