@@ -1490,6 +1490,7 @@
           r0 = r || { reason: 'null' };
           r0.index = idx;
           results.push(r0);
+          if (opts.onLevelResult) { try { opts.onLevelResult(r0); } catch (e) {} }
           log('LEVEL', idx, r0.reason, r0.tips);
           k++;
           // 第 16 条：胜利面板出现后先看 1.2~3 秒；非胜利也停 0.9~1.8 秒再切
@@ -1550,6 +1551,7 @@
           r0 = r || { reason: 'null' };
           r0.index = idx;
           results.push(r0);
+          if (opts.onLevelResult) { try { opts.onLevelResult(r0); } catch (e) {} }
           log('LEVEL', idx, r0.reason, r0.tips);
           idx++;
           return sleep(rand(1500, 3000));   // 打完看结算的自然停顿
