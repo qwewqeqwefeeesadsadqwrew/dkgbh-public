@@ -26,6 +26,36 @@
   function app() { var m = mod('chunks:///_virtual/app.ts'); return m && m.app; }
   function Guide() { var m = mod('chunks:///_virtual/GuideManager.ts'); return m && m.GuideManager && m.GuideManager.instance; }
 
+  // ===== 2026-11-15 远山反馈：跑几小时后每关都出现一个橙色转圈 =====
+  // 定位：那是游戏全局加载圈 UIMgrLoading（app.manager.ui.loading）。
+  //   正常一加载完就关；长时间运行后 showLoadingMap 里残留计数，导致它永远不关。
+  // 兜底：纯视觉关闭，不动游戏逻辑 ——
+  //   · 计数为 0 却还亮着 → 立刻关（不可能有加载在进行）
+  //   · 计数 > 0 但 45 秒不变 → 视为卡死，关掉
+  var __loadingWatch = { size: -1, at: 0 };
+  function killStuckLoading() {
+    try {
+      var a = app();
+      var ui = a && a.manager && a.manager.ui;
+      var node = ui && ui.loading;
+      if (!node) return;
+      if (!node.active) { __loadingWatch.size = -1; __loadingWatch.at = 0; return; }
+      var sz = -1;
+      try {
+        var m = ui.showLoadingMap;
+        if (m) sz = (typeof m.size === 'number') ? m.size : Object.keys(m).length;
+      } catch (e) {}
+      if (sz === 0) { node.active = false; __loadingWatch.size = -1; __loadingWatch.at = 0; log('loading-stuck-killed', 'size=0'); return; }
+      if (sz !== __loadingWatch.size) { __loadingWatch.size = sz; __loadingWatch.at = now(); return; }
+      if (!__loadingWatch.at) __loadingWatch.at = now();
+      if (now() - __loadingWatch.at > 45000) {
+        node.active = false;
+        log('loading-stuck-killed', 'size=' + sz, Math.round((now() - __loadingWatch.at) / 1000) + 's');
+        __loadingWatch.size = -1; __loadingWatch.at = 0;
+      }
+    } catch (e) {}
+  }
+
   // ---------- 触摸事件 ----------
   function evt(x, y, target) {
     var e = new (cc.Event.EventTouch)([], true);
@@ -233,6 +263,36 @@
     g.t = now();
     GESTURES.push(g);
     if (GESTURES.length > 12) GESTURES.shift();
+  }
+
+  // 2026-11-15：延迟释放上一关的 bundle（防内存线性增长）。
+  //   enter 时只记名字，等 playLevel 里新关完全就绪后再释放 —— 避开 onEnable/
+  //   渲染队列还在用旧 SpriteFrame、材质的窗口（早释放会产生 updateUVs 等报错）。
+  // 声明必须放在 enter（930 行附近）之前：严格模式下后面的 var 提升后仍是 undefined，
+  //   在 enter 里赋值会抛 ReferenceError 被 catch 吞掉（实测释放从来不生效）。
+  var pendingReleaseBundle = null;
+  function releasePrevLevel() {
+    if (!pendingReleaseBundle) return;
+    // 关键：只有确认「已经切到下一关」才释放（GameConfig.levelInfo.bundle 变了）。
+    // 否则旧节点还在显示/渲染，提前释放会 getGFXTexture 报错刷屏。
+    try {
+      var gcM0 = mod('chunks:///_virtual/GameConfig.ts');
+      var gc0 = gcM0 && gcM0.GameConfig;
+      if (gc0 && gc0.levelInfo && gc0.levelInfo.bundle === pendingReleaseBundle) {
+        setTimeout(function () { try { releasePrevLevel(); } catch (e9) {} }, 2000);
+        return;
+      }
+    } catch (e8) {}
+    var bn = pendingReleaseBundle;
+    pendingReleaseBundle = null;
+    try {
+      var b = cc.assetManager.getBundle(bn);
+      if (b) {
+        b.releaseAll();
+        cc.assetManager.removeBundle(b);
+        log('release-prev', bn);
+      }
+    } catch (e) { log('release-prev-err', String(e).slice(0, 60)); }
   }
 
   // ---------- 拟人参数（照《我来掌勺》human-pacing.md 实测表） ----------
@@ -930,6 +990,18 @@
     enter: function (idx, mode) {
       var a = app();
       if (!a) return 'NO-APP';
+      // 2026-11-14 修复内存线性增长（跑几小时浏览器崩溃的真因）：
+      //   实测 40 关 38 个关卡包、19000+ 资源、进程 4.5GB；单关 bundle 直接
+      //   releaseAll() 实测 583→195 个资源（释放 67%），说明引擎能释放，
+      //   只是游戏切关流程从没调用到（PageGame.onHide 的 removeBundle 时机/数据不对）。
+      // 2026-11-15：只记录上一关的 bundle 名，真正释放推迟到 playLevel 里「新关已就绪」之后
+      //   （见 releasePrevLevel）。在 enter 时释放会把渲染队列/onEnable 要用的
+      //   SpriteFrame/材质一起销毁 → updateUVs / getSharedMaterial 报错刷屏。
+      try {
+        var gcM = mod('chunks:///_virtual/GameConfig.ts');
+        var gc = gcM && gcM.GameConfig;
+        if (gc && gc.levelInfo && gc.levelInfo.bundle) pendingReleaseBundle = gc.levelInfo.bundle;
+      } catch (e) { log('release-pending-err', String(e).slice(0, 60)); }
       a.manager.ui.show({ name: 'PopLoad', data: { mode: mode || '文字', index: idx } });
       return 'ok';
     },
@@ -962,6 +1034,9 @@
     // 打完当前关 + 点下一关
     run: run
   };
+
+  // 每 2 秒兜底清一次卡住的加载圈（远山 2026-11-15 反馈的橙色转圈）
+  try { setInterval(killStuckLoading, 2000); } catch (e) {}
 
   function findByName(name) {
     var out = null;
@@ -1157,6 +1232,10 @@
       if (!r.ok) { reason = 'not-ready'; return null; }
       // 本关资源已就绪 → 放开预缓存闸门（公网版：先保游戏能玩，再后台缓存整包）
       try { window.__dkgbhPrecacheGo = true; } catch (e) {}
+      // 2026-11-15：新关已就绪（节点和资源都换好了）→ 这时才释放上一关的 bundle。
+      //   早一帧释放会把 onEnable/渲染队列要用的 SpriteFrame、材质一起销毁，
+      //   产生 updateUVs / getSharedMaterial 报错（实测 5000+）。
+      releasePrevLevel();
       var g = Guide();
       if (!g || !g._steps || !g._steps.length) { reason = 'no-steps'; return null; }
       var steps = g._steps;
