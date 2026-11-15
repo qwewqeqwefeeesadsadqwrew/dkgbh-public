@@ -465,7 +465,7 @@
         b = a;
       }
 
-      var pressMs = mode ? rand(40, 140) : rand(50, 180);       // 按下停顿（滑动 40~140 / 拖拽 50~180，技能口径）
+      var pressMs = mode ? rand(40, 140) : rand(80, 240);       // 按下停顿（滑动 40~140 / 拖拽 80~240，技能口径）
       var vx0 = b.x - a.x, vy0 = b.y - a.y;
       var dist0 = Math.sqrt(vx0 * vx0 + vy0 * vy0) || 1;
       var tgtW = 0;
@@ -474,7 +474,12 @@
       var dur = mode
         ? Math.min(600, Math.max(300, fittsDur(dist0, tgtW || 100) * 0.8))
         : fittsDur(dist0, tgtW || 80) * (0.85 + Math.random() * 0.3);
-      dur = clamp(dur, 350, 750);   // 技能：拖拽 350~750ms
+      if (mode) {
+        dur = clamp(dur, 300, 600);              // 技能：滑动 300~600ms
+      } else {
+        dur = (dist0 / rand(400, 600)) * 1000 * (0.9 + Math.random() * 0.2);
+        dur = clamp(dur, 500, 1500);             // 技能：拖拽 500~1500ms（按距离折算，2026-11-16）
+      }
       var nx = -vy0 / dist0, ny = vx0 / dist0;
       var curveAmp = mode ? 0.05 : 0.12;
       var curve = rand(-curveAmp, curveAmp) * Math.min(dist0, 260);

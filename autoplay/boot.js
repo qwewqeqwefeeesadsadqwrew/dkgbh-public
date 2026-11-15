@@ -31,7 +31,9 @@
   })();
 
   // 内存看护（技能坑册 383 / demo-runtime-playbook 4.1）：每 30 秒采一次堆，
-  // 连续 4 点单调上涨且斜率 > 2MB/min → 提前刷新换代（比 45 分钟定时刷新更早兜住泄漏）。
+  // 连续 8 点（4 分钟）单调上涨、堆 >300MB 且斜率 >8MB/min → 提前刷新换代。
+  // 2026-11-16 修：旧口径 4 点 / >2MB/min 在 23MB 堆时误触发（~101s 刷新一次），
+  // 40 关连播根本跑不完；现加绝对下限 + 拉长窗口 + 提高斜率阈值。
   (function memGuard() {
     try {
       if (!window.performance || !performance.memory) return;
@@ -40,15 +42,15 @@
         try {
           var v = Math.round(performance.memory.usedJSHeapSize / 1048576);
           samples.push({ t: Date.now(), mb: v });
-          if (samples.length > 6) samples.shift();
-          if (samples.length >= 4) {
-            var w = samples.slice(-4);
+          if (samples.length > 10) samples.shift();
+          if (samples.length >= 8) {
+            var w = samples.slice(-8);
             var mono = true, i;
             for (i = 1; i < w.length; i++) if (w[i].mb < w[i - 1].mb) mono = false;
-            var mins = (w[3].t - w[0].t) / 60000;
-            var slope = mins > 0 ? (w[3].mb - w[0].mb) / mins : 0;
-            if (mono && slope > 2) {
-              try { console.log('[boot] mem-guard：heap ' + w[3].mb + 'MB / 斜率 ' + slope.toFixed(1) + ' MB/min → 刷新换代'); } catch (e) {}
+            var mins = (w[7].t - w[0].t) / 60000;
+            var slope = mins > 0 ? (w[7].mb - w[0].mb) / mins : 0;
+            if (mono && w[7].mb > 300 && slope > 8) {
+              try { console.log('[boot] mem-guard：heap ' + w[7].mb + 'MB / 斜率 ' + slope.toFixed(1) + ' MB/min → 刷新换代'); } catch (e) {}
               location.reload();
             }
           }
@@ -66,11 +68,11 @@
   var SCRIPT_SRC = '';
   try { SCRIPT_SRC = (document.currentScript && document.currentScript.src) || ''; } catch (e) {}
   function driverSrc() {
-    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=31');
+    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=32');
     var base = (location.pathname.indexOf('/dkgbh-public/') >= 0)
       ? location.origin + '/dkgbh-public/'
       : location.origin + '/';
-    return base + 'autoplay/dkgbh-autoplay.js?v=31';
+    return base + 'autoplay/dkgbh-autoplay.js?v=32';
   }
 
   // ---------- 拟人节奏（与驱动同公式；只用于轮间停顿） ----------
