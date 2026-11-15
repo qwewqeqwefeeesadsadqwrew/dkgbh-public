@@ -3,7 +3,7 @@
  * 不用 ignoreSearch（Chrome 线性扫描 thousands 条会拖死主线程）——改成「去掉 query 后精确匹配」。
  * 入口页 / SW 本身 / 自动玩脚本永远走网络，保证改版能推出去。
  */
-var CACHE = 'dkgbh-rt-v2';
+var CACHE = 'dkgbh-rt-v3';
 var ALWAYS_NETWORK = /(?:^|\/)(?:index[^/]*\.html|precache\.(?:js|json)|sw\.js|[^/]*(?:boot|autoplay)[^/]*\.js)$/;
 var CACHEABLE = /\.(js|mjs|json|css|png|jpe?g|webp|gif|mp3|ogg|wav|mp4|cconb|wasm|bin|ttf|otf|woff2?|atlas|plist)$/i;
 
@@ -33,6 +33,22 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
+  // 2026-11-16：OSS 镜像缺的 3 个 atlas，改从本站 missing/ 精确供
+  var mk = keyOf(req.url);
+  var MISSING = {
+    'https://wlzs-demo-2026.oss-cn-hangzhou.aliyuncs.com/dkgbh-oss/web-mobile/assets/Level17/native/c9/c90e71e5-0863-45be-affe-ea6582680f87.b9432.atlas': 'missing/Level17-c9.atlas',
+    'https://wlzs-demo-2026.oss-cn-hangzhou.aliyuncs.com/dkgbh-oss/web-mobile/assets/Level32/native/1c/1c8018d6-c5c3-4826-bab4-9eb4a318dba3.57308.atlas': 'missing/Level32-1c.atlas',
+    'https://wlzs-demo-2026.oss-cn-hangzhou.aliyuncs.com/dkgbh-oss/web-mobile/assets/Level32/native/5e/5e689309-6c16-4808-bb8b-19e5c04cbc3f.26728.atlas': 'missing/Level32-5e.atlas'
+  };
+  if (MISSING[mk]) {
+    e.respondWith(fetch(new URL(MISSING[mk], self.registration.scope)).then(function (r) {
+      return r.arrayBuffer().then(function (b) {
+        return new Response(b, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': '*' } });
+      });
+    }));
+    return;
+  }
 
   // 2026-11-16：跨域资源（官方 CDN）不拦——SW 缓存会拖死游戏加载；只缓存同源
   if (url.origin !== self.location.origin) return;

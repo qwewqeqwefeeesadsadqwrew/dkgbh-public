@@ -1,0 +1,55 @@
+
+bopi.png
+size: 2004,967
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+pi1
+  rotate: false
+  xy: 1334, 8
+  size: 409, 957
+  orig: 409, 957
+  offset: 0, 0
+  index: -1
+pi2
+  rotate: false
+  xy: 902, 40
+  size: 430, 925
+  orig: 430, 925
+  offset: 0, 0
+  index: -1
+pi3
+  rotate: false
+  xy: 458, 32
+  size: 442, 933
+  orig: 442, 933
+  offset: 0, 0
+  index: -1
+xin
+  rotate: false
+  xy: 2, 2
+  size: 454, 963
+  orig: 455, 965
+  offset: 0, 1
+  index: -1
+youshou
+  rotate: true
+  xy: 1745, 318
+  size: 319, 161
+  orig: 319, 161
+  offset: 0, 0
+  index: -1
+zheceng
+  rotate: false
+  xy: 1745, 204
+  size: 179, 112
+  orig: 179, 112
+  offset: 0, 0
+  index: -1
+zuoshou
+  rotate: false
+  xy: 1745, 639
+  size: 257, 326
+  orig: 257, 326
+  offset: 0, 0
+  index: -1

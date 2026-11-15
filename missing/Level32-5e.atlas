@@ -1,0 +1,48 @@
+
+hualu.png
+size: 1181,1033
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+butterfiy
+  rotate: false
+  xy: 1006, 10
+  size: 82, 80
+  orig: 84, 82
+  offset: 1, 1
+  index: -1
+cover1
+  rotate: false
+  xy: 740, 92
+  size: 439, 344
+  orig: 441, 346
+  offset: 1, 1
+  index: -1
+cover2
+  rotate: false
+  xy: 740, 3
+  size: 264, 87
+  orig: 266, 89
+  offset: 1, 1
+  index: -1
+jie
+  rotate: true
+  xy: 2, 438
+  size: 593, 1116
+  orig: 593, 1116
+  offset: 0, 0
+  index: -1
+mei
+  rotate: true
+  xy: 2, 2
+  size: 434, 736
+  orig: 461, 736
+  offset: 27, 0
+  index: -1
+water
+  rotate: false
+  xy: 1120, 1008
+  size: 14, 23
+  orig: 16, 25
+  offset: 1, 1
+  index: -1
