@@ -1534,9 +1534,9 @@
             // 首次进关可能比引擎就绪还早：退回去重进一次
             log('retry-enter', idx, r.reason);
             if (popShown('PopLoad')) { try { app().manager.ui.hide({ name: 'PopLoad' }); } catch (e) {} }
-            return sleep(rand(1931, 3617))
+            return sleep(rand(1500, 3000))
               .then(function () { return root.__AUTO.enter(idx, opts.mode); })
-              .then(function () { return sleep(rand(2411, 4087)); })
+              .then(function () { return sleep(rand(1500, 3000)); })
               .then(function () {
           var o2 = {}; for (var kk in opts) o2[kk] = opts[kk];
           o2.nextIdx = (k + 1 < list.length) ? list[k + 1] : null;   // 预加载目标
@@ -1551,7 +1551,7 @@
           results.push(r0);
           log('LEVEL', idx, r0.reason, r0.tips);
           idx++;
-          return sleep(rand(2137, 3929));   // 打完看结算的自然停顿
+          return sleep(rand(1500, 3000));   // 打完看结算的自然停顿
         })
         .then(one);
     }
