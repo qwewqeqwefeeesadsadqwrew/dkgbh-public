@@ -1,0 +1,20 @@
+
+baibu.png
+size: 324,266
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+cloth
+  rotate: true
+  xy: 2, 2
+  size: 262, 269
+  orig: 280, 311
+  offset: 18, 0
+  index: -1
+cover
+  rotate: true
+  xy: 273, 212
+  size: 52, 49
+  orig: 54, 51
+  offset: 1, 1
+  index: -1
