@@ -30,6 +30,33 @@
     } catch (e) {}
   })();
 
+  // 内存看护（技能坑册 383 / demo-runtime-playbook 4.1）：每 30 秒采一次堆，
+  // 连续 4 点单调上涨且斜率 > 2MB/min → 提前刷新换代（比 45 分钟定时刷新更早兜住泄漏）。
+  (function memGuard() {
+    try {
+      if (!window.performance || !performance.memory) return;
+      var samples = [];
+      setInterval(function () {
+        try {
+          var v = Math.round(performance.memory.usedJSHeapSize / 1048576);
+          samples.push({ t: Date.now(), mb: v });
+          if (samples.length > 6) samples.shift();
+          if (samples.length >= 4) {
+            var w = samples.slice(-4);
+            var mono = true, i;
+            for (i = 1; i < w.length; i++) if (w[i].mb < w[i - 1].mb) mono = false;
+            var mins = (w[3].t - w[0].t) / 60000;
+            var slope = mins > 0 ? (w[3].mb - w[0].mb) / mins : 0;
+            if (mono && slope > 2) {
+              try { console.log('[boot] mem-guard：heap ' + w[3].mb + 'MB / 斜率 ' + slope.toFixed(1) + ' MB/min → 刷新换代'); } catch (e) {}
+              location.reload();
+            }
+          }
+        } catch (e) {}
+      }, 30000);
+    } catch (e) {}
+  })();
+
   var POOL = [];                       // 关卡索引池（0..39 = 前 40 关）
   for (var p = 0; p < 40; p++) POOL.push(p);
   var MODE = '文字';
