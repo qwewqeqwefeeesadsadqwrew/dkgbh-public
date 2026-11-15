@@ -3,7 +3,7 @@
  * 不用 ignoreSearch（Chrome 线性扫描 thousands 条会拖死主线程）——改成「去掉 query 后精确匹配」。
  * 入口页 / SW 本身 / 自动玩脚本永远走网络，保证改版能推出去。
  */
-var CACHE = 'dkgbh-rt-v5';
+var CACHE = 'dkgbh-rt-v6';
 var ALWAYS_NETWORK = /(?:^|\/)(?:index[^/]*\.html|precache\.(?:js|json)|sw\.js|[^/]*(?:boot|autoplay)[^/]*\.js)$/;
 var CACHEABLE = /\.(js|mjs|json|css|png|jpe?g|webp|gif|mp3|ogg|wav|mp4|cconb|wasm|bin|ttf|otf|woff2?|atlas|plist)$/i;
 
@@ -34,26 +34,6 @@ self.addEventListener('fetch', function (e) {
   var url = new URL(req.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
-  // 2026-11-16：OSS 镜像缺件 → 官方 CDN 兜底（网络优先，只有 404 才回退）
-  if (url.origin === 'https://wlzs-demo-2026.oss-cn-hangzhou.aliyuncs.com' && url.pathname.indexOf('/assets/') >= 0) {
-    var rel = url.pathname.replace(/^\/dkgbh-oss\/web-mobile\//, '');
-    e.respondWith(fetch(req).then(function (res) {
-      if (res.status !== 404) return res;
-      var official = 'https://wk-cdn-game.chuanglinggame.com/bghyw/dkgbh/web-mobile/' + rel;
-      return fetch(official).then(function (r2) {
-        if (r2.ok) return r2.arrayBuffer().then(function (b) {
-          return new Response(b, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': '*' } });
-        });
-        return fetch(new URL('missing/' + rel, self.registration.scope)).then(function (r3) {
-          if (!r3.ok) return res;
-          return r3.arrayBuffer().then(function (b) {
-            return new Response(b, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': '*' } });
-          });
-        }).catch(function () { return res; });
-      }).catch(function () { return res; });
-    }));
-    return;
-  }
   // 2026-11-16：跨域资源（官方 CDN）不拦——SW 缓存会拖死游戏加载；只缓存同源
   if (url.origin !== self.location.origin) return;
 
