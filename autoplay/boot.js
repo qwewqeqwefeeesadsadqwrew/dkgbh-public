@@ -66,11 +66,11 @@
   var SCRIPT_SRC = '';
   try { SCRIPT_SRC = (document.currentScript && document.currentScript.src) || ''; } catch (e) {}
   function driverSrc() {
-    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=29');
+    if (SCRIPT_SRC) return SCRIPT_SRC.replace(/boot\.js(\?.*)?$/, 'dkgbh-autoplay.js?v=30');
     var base = (location.pathname.indexOf('/dkgbh-public/') >= 0)
       ? location.origin + '/dkgbh-public/'
       : location.origin + '/';
-    return base + 'autoplay/dkgbh-autoplay.js?v=29';
+    return base + 'autoplay/dkgbh-autoplay.js?v=30';
   }
 
   // ---------- 拟人节奏（与驱动同公式；只用于轮间停顿） ----------
@@ -154,6 +154,7 @@
         seenOrders: history.length,
         state: DEMO.state,
         wins: DEMO.wins,
+        results: (DEMO.results || []).slice(-20),
         losses: DEMO.losses,
         pool: POOL.slice()
       };
@@ -216,7 +217,14 @@
     log('第 ' + DEMO.round + ' 轮开始，队列: ' + DEMO.queue.map(function (x) { return x + 1; }).join(' → '));
     DEMO.state = 'running';
 
-    window.__AUTO.runList(DEMO.queue, { mode: MODE }).then(function (results) {
+    window.__AUTO.runList(DEMO.queue, { mode: MODE, onLevelResult: function (r) {
+      try {
+        if (r && r.reason === 'win') DEMO.wins++; else DEMO.losses++;
+        DEMO.results = DEMO.results || [];
+        DEMO.results.push({ level: r.index, reason: r.reason, at: Date.now() });
+        if (DEMO.results.length > 100) DEMO.results.shift();
+      } catch (e) {}
+    } }).then(function (results) {
       var wins = (results || []).filter(function (r) { return r.reason === 'win'; }).length;
       var lost = (results || []).length - wins;
       DEMO.wins += wins; DEMO.losses += lost;
