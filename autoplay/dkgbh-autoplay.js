@@ -14,7 +14,8 @@
   var cc = root.cc;
   var LOG = [];
   var LEVEL_GEN = 0;
-  var VDBG = { gen: 0, sets: [], early: [], resets: [], panels: [], levels: [] };
+  var WIN_LATCHED = null, FAIL_LATCHED = null;
+  var VDBG = { gen: 0, latches: [], rejected: [], sets: [], early: [], resets: [], panels: [], levels: [], samples: [] };
   try { root.__VDBG = VDBG; } catch (e) {}
   function vdbgSnap() {
     try {
@@ -26,6 +27,45 @@
     } catch (e) { return { gen: LEVEL_GEN, err: String(e) }; }
   }
   function vdbgPush(arr, o) { try { arr.push(o); if (arr.length > 500) arr.shift(); } catch (e) {} }
+  function allTipsDone(g) {
+    g = g || Guide();
+    if (!g || !g._steps || !g._steps.length) return false;
+    var n = g._steps.length, d = 0;
+    for (var i = 0; i < n; i++) if (g.tiptrue && g.tiptrue[i]) d++;
+    return d >= n;
+  }
+  function winLatched() { return !!(WIN_LATCHED && WIN_LATCHED.gen === LEVEL_GEN); }
+  function failLatched() { return !!(FAIL_LATCHED && FAIL_LATCHED.gen === LEVEL_GEN); }
+  function sampleLatches(src) {
+    try {
+      var g = Guide(), lv = levelComp(), pg = pageGame();
+      var steps = g && g._steps ? g._steps.length : 0;
+      var done = 0;
+      if (g && g.tiptrue) for (var i = 0; i < g.tiptrue.length; i++) if (g.tiptrue[i]) done++;
+      var all = steps > 0 && done >= steps;
+      var pv = !!popShown('PopVictory'), pf = !!popShown('PopFail');
+      if ((pv || pf) && VDBG.samples.length < 500) {
+        vdbgPush(VDBG.samples, { t: Date.now(), gen: LEVEL_GEN, src: src, pv: pv, pf: pf, done: done, steps: steps, all: all, level: lv && lv.node ? lv.node.name : null, timer: pg ? pg.countdownNum : null });
+      }
+      // 只在本关代次 + 全部 tips 完成后，首次采到 PopVictory 就锁存（不要求稳定可见）
+      if (pv && all && !winLatched()) {
+        WIN_LATCHED = { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: 'PopVictory', level: lv && lv.node ? lv.node.name : null };
+        vdbgPush(VDBG.latches, { ev: 'win', t: WIN_LATCHED.t, gen: LEVEL_GEN, done: done, steps: steps, name: 'PopVictory', level: WIN_LATCHED.level, src: src });
+        log('WIN_LATCHED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'src=' + src);
+      }
+      // 中途面板（steps 未完成）只记录为拒绝，绝不锁存
+      if (pv && !all) {
+        if (VDBG.rejected.length < 500) vdbgPush(VDBG.rejected, { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: 'PopVictory', reason: 'not-all-tips', src: src });
+        log('WIN_REJECTED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'src=' + src);
+      }
+      // PopFail 独立锁存，绝不与胜利共用
+      if (pf && !failLatched()) {
+        FAIL_LATCHED = { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: 'PopFail', level: lv && lv.node ? lv.node.name : null };
+        vdbgPush(VDBG.latches, { ev: 'fail', t: FAIL_LATCHED.t, gen: LEVEL_GEN, done: done, steps: steps, name: 'PopFail', level: FAIL_LATCHED.level, src: src });
+        log('FAIL_LATCHED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'src=' + src);
+      }
+    } catch (e) {}
+  }
   function log() {
     var args = Array.prototype.slice.call(arguments);
     var line = args.join(' ');
@@ -216,14 +256,13 @@
     return kids[0];
   }
 
-  var VICTORY_AT = 0;          // 面板一出现就记时间，独立于步骤循环
   var WATCH_VICTORY = false;
   function sleep(ms) {
     return new Promise(function (resolve) {
       var t0 = now();
       (function tick() {
-        if (WATCH_VICTORY && VICTORY_AT) {
-          var vs = vdbgSnap(); vs.t = Date.now(); vs.fn = 'sleep'; vs.ms = ms; vs.stack = (new Error()).stack;
+        if (WATCH_VICTORY && (winLatched() || failLatched())) {
+          var vs = vdbgSnap(); vs.t = Date.now(); vs.fn = 'sleep'; vs.ms = ms; vs.win = winLatched(); vs.fail = failLatched(); vs.stack = (new Error()).stack;
           vdbgPush(VDBG.early, vs);
           return resolve();
         }
@@ -1050,7 +1089,7 @@
       function attempt() {
         tries++;
         return execStep(s, tries - 1).then(function () {
-          return waitFor(function () { return g.tiptrue[i] || !!popShown('PopVictory') || !!popShown('PopFail'); }, maxStepMs || 6000, 100);
+          return waitFor(function () { return g.tiptrue[i] || winLatched() || failLatched(); }, maxStepMs || 6000, 100);
         }).then(function (r) {
           if (r.ok || tries >= maxTry) return { before: before, after: !!g.tiptrue[i], tries: tries, ms: r.ms, resolved: (function () { try { var t = resolveNode(s[1], (s[2] && s[2].worldPosition) ? s[2] : null); return t && t.name; } catch (e) { return null; } })() };
           return waitFor(function () {
@@ -1105,16 +1144,31 @@
     var t0 = now();
     return new Promise(function (resolve) {
       (function tick() {
-        if (WATCH_VICTORY && VICTORY_AT) {
-          var vw = vdbgSnap(); vw.t = Date.now(); vw.fn = 'waitFor'; vw.timeout = timeout; vw.stack = (new Error()).stack;
+        if (WATCH_VICTORY && (winLatched() || failLatched())) {
+          var vw = vdbgSnap(); vw.t = Date.now(); vw.fn = 'waitFor'; vw.timeout = timeout; vw.win = winLatched(); vw.fail = failLatched(); vw.stack = (new Error()).stack;
           vdbgPush(VDBG.early, vw);
-          return resolve({ ok: true, ms: now() - t0, victory: true });
+          return resolve({ ok: true, ms: now() - t0, victory: winLatched(), fail: failLatched() });
         }
         var v = false;
         try { v = fn(); } catch (e) { v = false; }
         if (v) return resolve({ ok: true, ms: now() - t0 });
         if (now() - t0 > (timeout || 8000)) return resolve({ ok: false, ms: now() - t0 });
         setTimeout(tick, poll || 120);
+      })();
+    });
+  }
+
+  // 终局等待：只等本关锁存；面板闪一下也算数，不要求稳定可见
+  function waitForFinal(fn, timeout, poll) {
+    var t0 = now();
+    return new Promise(function (resolve) {
+      (function tick() {
+        sampleLatches('final-wait');
+        var v = false;
+        try { v = fn(); } catch (e) { v = false; }
+        if (v) return resolve({ ok: true, ms: now() - t0 });
+        if (now() - t0 > (timeout || 30000)) return resolve({ ok: false, ms: now() - t0 });
+        setTimeout(tick, poll || 200);
       })();
     });
   }
@@ -1269,7 +1323,8 @@
     var vWatch = null, pWatch = null;
     LEVEL_GEN++; VDBG.gen = LEVEL_GEN;
     vdbgPush(VDBG.levels, { t: Date.now(), gen: LEVEL_GEN, ev: 'start' });
-    WATCH_VICTORY = true; VICTORY_AT = 0;
+    WIN_LATCHED = null; FAIL_LATCHED = null;
+    WATCH_VICTORY = true;
     vdbgPush(VDBG.resets, { t: Date.now(), gen: LEVEL_GEN, ev: 'start' });
     var lastPv = false, lastPf = false;
     pWatch = setInterval(function () {
@@ -1278,17 +1333,11 @@
         if (pv !== lastPv) { vdbgPush(VDBG.panels, { t: Date.now(), gen: LEVEL_GEN, name: 'PopVictory', on: pv }); lastPv = pv; }
         if (pf !== lastPf) { vdbgPush(VDBG.panels, { t: Date.now(), gen: LEVEL_GEN, name: 'PopFail', on: pf }); lastPf = pf; }
       } catch (e) {}
+      sampleLatches('panel-watch');
     }, 80);
     vWatch = setInterval(function () {
-      if (!WATCH_VICTORY || VICTORY_AT) return;
-      try {
-        var pv = popShown('PopVictory'), pf = popShown('PopFail');
-        if (pv || pf) {
-          VICTORY_AT = now();
-          var vs = vdbgSnap(); vs.t = Date.now(); vs.ev = 'set'; vs.src = pv ? 'victory' : 'fail';
-          vdbgPush(VDBG.sets, vs);
-        }
-      } catch (e) {}
+      if (!WATCH_VICTORY) return;
+      sampleLatches('victory-watch');
     }, 150);
 
     return waitReady(240000).then(function (r) {   // 公网首次加载关卡要几百个请求，给 4 分钟
@@ -1347,8 +1396,8 @@
         function next() {
           if (STOP) { reason = 'stopped'; return null; }
           if (now() - t0 > deadline) { reason = 'timeout'; return null; }
-          if (popShown('PopVictory')) { reason = 'win'; return null; }
-          if (popShown('PopFail')) { reason = 'lose'; return null; }
+          if (winLatched()) { reason = 'win'; return null; }
+          if (failLatched()) { reason = 'lose'; return null; }
           trackProgress();
           if (now() - lastProgressAt > 30000) {              // 技能第 24 条：30 秒无进度 → 换下一关
             log('stall-giveup', 'no-progress-30s', 'step=' + i);
@@ -1370,8 +1419,10 @@
           while (i < steps.length && g.tiptrue[i]) i++;
           if (i >= steps.length) {
             // 全部完成：等收尾演出 + GameWin（末步演出可能 10 秒以上，例：第 2 关盖章 8.1s）
-            return waitFor(function () { return !!popShown('PopVictory') || !!popShown('PopFail'); }, 30000, 200).then(function () {
-              reason = popShown('PopVictory') ? 'win' : (popShown('PopFail') ? 'lose' : 'alltips-no-victory');
+            log('final-wait-start');
+            return waitForFinal(function () { return winLatched() || failLatched(); }, 30000, 200).then(function (r) {
+              reason = winLatched() ? 'win' : (failLatched() ? 'lose' : 'alltips-no-victory');
+              log('final-wait-end', 'ok=' + (r && r.ok), 'ms=' + (r && r.ms), 'winLatch=' + winLatched(), 'failLatch=' + failLatched(), 'done=' + allTipsDone());
               return null;
             });
           }
@@ -1430,7 +1481,8 @@
           function attempt() {
             if (STOP) { reason = 'stopped'; return null; }
             if (now() - t0 > deadline) { reason = 'timeout'; return null; }
-            if (popShown('PopVictory')) { reason = 'win'; return null; }
+            if (winLatched()) { reason = 'win'; return null; }
+            if (failLatched()) { reason = 'lose'; return null; }
             trackProgress();
             if (now() - lastProgressAt > 30000) {              // 30 秒零进度 → 换下一关，绝不重进
               log('stall-giveup', 'no-progress-30s', 'step=' + i);
@@ -1463,7 +1515,7 @@
               });
             }).then(function (wr) {
               if (wr && wr.stop) return null;
-              return waitFor(function () { return g.tiptrue[i] || !!popShown('PopVictory') || !!popShown('PopFail'); }, waitMs, 120);
+              return waitFor(function () { return g.tiptrue[i] || winLatched() || failLatched(); }, waitMs, 120);
             }).then(function (r2) {
               if (r2 && r2.ok) {
                 // 照掌勺：下一拍等 = max(动画时长 + 650 + rand(0,350), 下一拍的 gap)
@@ -1498,14 +1550,14 @@
       return out;
     }).then(function (out) {
       vdbgPush(VDBG.levels, { t: Date.now(), gen: LEVEL_GEN, ev: 'end', reason: out && out.reason, tips: out && out.tips, ms: out && out.ms });
-      WATCH_VICTORY = false; VICTORY_AT = 0;
+      WATCH_VICTORY = false;
       vdbgPush(VDBG.resets, { t: Date.now(), gen: LEVEL_GEN, ev: 'end' });
       if (vWatch) { clearInterval(vWatch); vWatch = null; }
       if (pWatch) { clearInterval(pWatch); pWatch = null; }
       return out;
     }, function (err) {
       vdbgPush(VDBG.levels, { t: Date.now(), gen: LEVEL_GEN, ev: 'error', err: String(err) });
-      WATCH_VICTORY = false; VICTORY_AT = 0;
+      WATCH_VICTORY = false;
       vdbgPush(VDBG.resets, { t: Date.now(), gen: LEVEL_GEN, ev: 'end-err' });
       if (vWatch) { clearInterval(vWatch); vWatch = null; }
       if (pWatch) { clearInterval(pWatch); pWatch = null; }
