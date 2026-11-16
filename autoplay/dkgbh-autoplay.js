@@ -1088,6 +1088,7 @@
     var t0 = now();
     return new Promise(function (resolve) {
       (function tick() {
+        if (WATCH_VICTORY && VICTORY_AT) return resolve({ ok: true, ms: now() - t0, victory: true });
         var v = false;
         try { v = fn(); } catch (e) { v = false; }
         if (v) return resolve({ ok: true, ms: now() - t0 });
