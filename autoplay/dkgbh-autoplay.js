@@ -1450,7 +1450,10 @@
     var names = ['PopVictory', 'PopFail', 'PopLoad', 'PopAd', 'PopReward', 'PopSign', 'PopShare', 'PopTips'];
     for (var i = 0; i < names.length; i++) {
       var n = popShown(names[i]);
-      if (n) { try { app().manager.ui.hide({ name: names[i] }); } catch (e) {} }
+      if (n) {
+        try { app().manager.ui.hide({ name: names[i] }); } catch (e) {}
+        try { n.active = false; } catch (e) {}
+      }
     }
   }
 
