@@ -17,22 +17,26 @@
   var WIN_LATCHED = null, FAIL_LATCHED = null;
   var VDBG = { gen: 0, latches: [], rejected: [], sets: [], early: [], resets: [], panels: [], levels: [], samples: [] };
   try { root.__VDBG = VDBG; } catch (e) {}
+  function countDone(g) {
+    g = g || Guide();
+    if (!g || !g._steps) return 0;
+    var n = g._steps.length, d = 0;
+    for (var i = 0; i < n; i++) if (g.tiptrue && g.tiptrue[i]) d++;
+    return d;
+  }
   function vdbgSnap() {
     try {
       var g = Guide(), lv = levelComp(), pg = pageGame();
       var steps = g && g._steps ? g._steps.length : 0;
-      var done = 0;
-      if (g && g.tiptrue) for (var i = 0; i < g.tiptrue.length; i++) if (g.tiptrue[i]) done++;
+      var done = countDone(g);
       return { gen: LEVEL_GEN, done: done, steps: steps, level: lv && lv.node ? lv.node.name : null, timer: pg ? pg.countdownNum : null };
     } catch (e) { return { gen: LEVEL_GEN, err: String(e) }; }
   }
   function vdbgPush(arr, o) { try { arr.push(o); if (arr.length > 500) arr.shift(); } catch (e) {} }
   function allTipsDone(g) {
     g = g || Guide();
-    if (!g || !g._steps || !g._steps.length) return false;
-    var n = g._steps.length, d = 0;
-    for (var i = 0; i < n; i++) if (g.tiptrue && g.tiptrue[i]) d++;
-    return d >= n;
+    var n = g && g._steps ? g._steps.length : 0;
+    return n > 0 && countDone(g) === n;
   }
   function winLatched() { return !!(WIN_LATCHED && WIN_LATCHED.gen === LEVEL_GEN); }
   function failLatched() { return !!(FAIL_LATCHED && FAIL_LATCHED.gen === LEVEL_GEN); }
@@ -40,9 +44,8 @@
     try {
       var g = Guide(), lv = levelComp(), pg = pageGame();
       var steps = g && g._steps ? g._steps.length : 0;
-      var done = 0;
-      if (g && g.tiptrue) for (var i = 0; i < g.tiptrue.length; i++) if (g.tiptrue[i]) done++;
-      var all = steps > 0 && done >= steps;
+      var done = countDone(g);
+      var all = steps > 0 && done === steps;
       var pv = !!popShown('PopVictory'), pf = !!popShown('PopFail');
       if ((pv || pf) && VDBG.samples.length < 500) {
         vdbgPush(VDBG.samples, { t: Date.now(), gen: LEVEL_GEN, src: src, pv: pv, pf: pf, done: done, steps: steps, all: all, level: lv && lv.node ? lv.node.name : null, timer: pg ? pg.countdownNum : null });
@@ -828,7 +831,7 @@
   function state() {
     var g = Guide(), pg = pageGame(), lv = levelComp();
     return {
-      guide: g ? { steps: (g._steps || []).length, cur: g._currentStep, done: (g.tiptrue || []).slice() } : null,
+      guide: g ? { steps: (g._steps || []).length, cur: g._currentStep, done: (g.tiptrue || []).slice(0, (g._steps || []).length) } : null,
       tips: pg ? { state: (pg.nowlevelTipState || []).slice(), cur: pg.currentTipIndex, loaded: !!pg.isGameLoaded, paused: !!(app() && app().store ? false : false) } : null,
       level: lv ? { name: lv.node.name, locked: !!(lv.eventLock && lv.eventLock.active) } : null,
       timer: pg ? pg.countdownNum : null
@@ -1373,7 +1376,7 @@
         var lastProgressAt = now(), lastSeenI = -1, lastSeenDone = -1;
         function trackProgress() {
           var doneNow = 0;
-          try { for (var k = 0; k < (g.tiptrue || []).length; k++) if (g.tiptrue[k]) doneNow++; } catch (e) {}
+          try { doneNow = countDone(g); } catch (e) {}
           if (i !== lastSeenI || doneNow !== lastSeenDone) {
             lastSeenI = i; lastSeenDone = doneNow; lastProgressAt = now();
           }
