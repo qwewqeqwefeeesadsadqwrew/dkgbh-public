@@ -203,7 +203,18 @@
     return kids[0];
   }
 
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  var VICTORY_AT = 0;          // 面板一出现就记时间，独立于步骤循环
+  var WATCH_VICTORY = false;
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      var t0 = now();
+      (function tick() {
+        if (WATCH_VICTORY && VICTORY_AT) return resolve();
+        if (now() - t0 >= ms) return resolve();
+        setTimeout(tick, 100);
+      })();
+    });
+  }
 
   function now() { return Date.now(); }
 
@@ -1233,6 +1244,14 @@
     var deadline = opts.deadlineMs || 600000;
     var t0 = now();
     var reason = 'unknown';
+    var vWatch = null;
+    WATCH_VICTORY = true; VICTORY_AT = 0;
+    vWatch = setInterval(function () {
+      if (!WATCH_VICTORY || VICTORY_AT) return;
+      try {
+        if (popShown('PopVictory') || popShown('PopFail')) VICTORY_AT = now();
+      } catch (e) {}
+    }, 150);
 
     return waitReady(240000).then(function (r) {   // 公网首次加载关卡要几百个请求，给 4 分钟
       if (!r.ok) { reason = 'not-ready'; return null; }
@@ -1439,6 +1458,14 @@
       var out = { reason: reason, tips: done + '/' + total, ms: now() - t0, timer: st.timer };
       log('level-done', JSON.stringify(out));
       return out;
+    }).then(function (out) {
+      WATCH_VICTORY = false; VICTORY_AT = 0;
+      if (vWatch) { clearInterval(vWatch); vWatch = null; }
+      return out;
+    }, function (err) {
+      WATCH_VICTORY = false; VICTORY_AT = 0;
+      if (vWatch) { clearInterval(vWatch); vWatch = null; }
+      throw err;
     });
   }
 
