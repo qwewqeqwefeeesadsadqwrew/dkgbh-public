@@ -1619,7 +1619,6 @@
       var n = popShown(names[i]);
       if (n) {
         try { app().manager.ui.hide({ name: names[i] }); } catch (e) {}
-        try { n.active = false; } catch (e) {}
       }
     }
   }
