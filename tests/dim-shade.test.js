@@ -17,6 +17,7 @@ const LEVELS = process.env.DKGBH_LEVELS || '4';
 const SOAK_MS = Math.max(0, Number(process.env.DKGBH_SOAK_MS) || 0);
 const MIN_RESULTS = Math.max(1, Number(process.env.DKGBH_MIN_RESULTS) || 2);
 const SMOKE = process.env.DKGBH_SMOKE === '1';
+const ONLINE_URL = process.env.DKGBH_ONLINE_URL || '';
 const TARGET_LEVELS = LEVELS.split(',').map(function (x) { return Number(x) - 1; })
   .filter(function (x) { return x >= 0 && x < 40; });
 process.on('unhandledRejection', e => console.error('UNHANDLED', e && e.stack || e));
@@ -78,9 +79,15 @@ const CHECK = `(function(){
 (async () => {
   let child = null, s = null, server = null;
   try {
-    const { page } = prep();
-    server = await serve();
-    console.log('SERVER ' + page);
+    let page;
+    if (ONLINE_URL) {
+      page = ONLINE_URL;
+      console.log('ONLINE ' + page);
+    } else {
+      ({ page } = prep());
+      server = await serve();
+      console.log('SERVER ' + page);
+    }
     const exe = ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].find(f => { try { return fs.existsSync(f); } catch (e) { return false; } });
     child = spawn(exe, ['--headless=new', '--remote-debugging-port=' + DBG, '--user-data-dir=' + PROFILE, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--window-size=414,896', '--hide-scrollbars', '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-gpu', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', 'about:blank'], { detached: true, stdio: 'ignore', windowsHide: true });
     let ok = false; for (let i = 0; i < 80; i++) { try { const r = await fetch('http://127.0.0.1:' + DBG + '/json/version'); if (r.ok) { ok = true; break; } } catch (e) {} await sleep(500); }
