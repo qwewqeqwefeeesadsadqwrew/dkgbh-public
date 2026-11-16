@@ -13,6 +13,19 @@
   'use strict';
   var cc = root.cc;
   var LOG = [];
+  var LEVEL_GEN = 0;
+  var VDBG = { gen: 0, sets: [], early: [], resets: [], panels: [], levels: [] };
+  try { root.__VDBG = VDBG; } catch (e) {}
+  function vdbgSnap() {
+    try {
+      var g = Guide(), lv = levelComp(), pg = pageGame();
+      var steps = g && g._steps ? g._steps.length : 0;
+      var done = 0;
+      if (g && g.tiptrue) for (var i = 0; i < g.tiptrue.length; i++) if (g.tiptrue[i]) done++;
+      return { gen: LEVEL_GEN, done: done, steps: steps, level: lv && lv.node ? lv.node.name : null, timer: pg ? pg.countdownNum : null };
+    } catch (e) { return { gen: LEVEL_GEN, err: String(e) }; }
+  }
+  function vdbgPush(arr, o) { try { arr.push(o); if (arr.length > 500) arr.shift(); } catch (e) {} }
   function log() {
     var args = Array.prototype.slice.call(arguments);
     var line = args.join(' ');
@@ -209,7 +222,11 @@
     return new Promise(function (resolve) {
       var t0 = now();
       (function tick() {
-        if (WATCH_VICTORY && VICTORY_AT) return resolve();
+        if (WATCH_VICTORY && VICTORY_AT) {
+          var vs = vdbgSnap(); vs.t = Date.now(); vs.fn = 'sleep'; vs.ms = ms; vs.stack = (new Error()).stack;
+          vdbgPush(VDBG.early, vs);
+          return resolve();
+        }
         if (now() - t0 >= ms) return resolve();
         setTimeout(tick, 100);
       })();
@@ -1088,7 +1105,11 @@
     var t0 = now();
     return new Promise(function (resolve) {
       (function tick() {
-        if (WATCH_VICTORY && VICTORY_AT) return resolve({ ok: true, ms: now() - t0, victory: true });
+        if (WATCH_VICTORY && VICTORY_AT) {
+          var vw = vdbgSnap(); vw.t = Date.now(); vw.fn = 'waitFor'; vw.timeout = timeout; vw.stack = (new Error()).stack;
+          vdbgPush(VDBG.early, vw);
+          return resolve({ ok: true, ms: now() - t0, victory: true });
+        }
         var v = false;
         try { v = fn(); } catch (e) { v = false; }
         if (v) return resolve({ ok: true, ms: now() - t0 });
@@ -1245,12 +1266,28 @@
     var deadline = opts.deadlineMs || 600000;
     var t0 = now();
     var reason = 'unknown';
-    var vWatch = null;
+    var vWatch = null, pWatch = null;
+    LEVEL_GEN++; VDBG.gen = LEVEL_GEN;
+    vdbgPush(VDBG.levels, { t: Date.now(), gen: LEVEL_GEN, ev: 'start' });
     WATCH_VICTORY = true; VICTORY_AT = 0;
+    vdbgPush(VDBG.resets, { t: Date.now(), gen: LEVEL_GEN, ev: 'start' });
+    var lastPv = false, lastPf = false;
+    pWatch = setInterval(function () {
+      try {
+        var pv = !!popShown('PopVictory'), pf = !!popShown('PopFail');
+        if (pv !== lastPv) { vdbgPush(VDBG.panels, { t: Date.now(), gen: LEVEL_GEN, name: 'PopVictory', on: pv }); lastPv = pv; }
+        if (pf !== lastPf) { vdbgPush(VDBG.panels, { t: Date.now(), gen: LEVEL_GEN, name: 'PopFail', on: pf }); lastPf = pf; }
+      } catch (e) {}
+    }, 80);
     vWatch = setInterval(function () {
       if (!WATCH_VICTORY || VICTORY_AT) return;
       try {
-        if (popShown('PopVictory') || popShown('PopFail')) VICTORY_AT = now();
+        var pv = popShown('PopVictory'), pf = popShown('PopFail');
+        if (pv || pf) {
+          VICTORY_AT = now();
+          var vs = vdbgSnap(); vs.t = Date.now(); vs.ev = 'set'; vs.src = pv ? 'victory' : 'fail';
+          vdbgPush(VDBG.sets, vs);
+        }
       } catch (e) {}
     }, 150);
 
@@ -1460,12 +1497,18 @@
       log('level-done', JSON.stringify(out));
       return out;
     }).then(function (out) {
+      vdbgPush(VDBG.levels, { t: Date.now(), gen: LEVEL_GEN, ev: 'end', reason: out && out.reason, tips: out && out.tips, ms: out && out.ms });
       WATCH_VICTORY = false; VICTORY_AT = 0;
+      vdbgPush(VDBG.resets, { t: Date.now(), gen: LEVEL_GEN, ev: 'end' });
       if (vWatch) { clearInterval(vWatch); vWatch = null; }
+      if (pWatch) { clearInterval(pWatch); pWatch = null; }
       return out;
     }, function (err) {
+      vdbgPush(VDBG.levels, { t: Date.now(), gen: LEVEL_GEN, ev: 'error', err: String(err) });
       WATCH_VICTORY = false; VICTORY_AT = 0;
+      vdbgPush(VDBG.resets, { t: Date.now(), gen: LEVEL_GEN, ev: 'end-err' });
       if (vWatch) { clearInterval(vWatch); vWatch = null; }
+      if (pWatch) { clearInterval(pWatch); pWatch = null; }
       throw err;
     });
   }
