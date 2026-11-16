@@ -24,6 +24,24 @@
     for (var i = 0; i < n; i++) if (g.tiptrue && g.tiptrue[i]) d++;
     return d;
   }
+  function panelPath(n) {
+    var p = [];
+    while (n) { p.unshift(n.name); n = n.parent; }
+    return '/' + p.join('/');
+  }
+  function activePanelNodes(name) {
+    var out = [];
+    (function walk(n) {
+      if (!n) return;
+      if (n.name === name && n.activeInHierarchy) {
+        out.push({ path: panelPath(n), name: n.name, parent: n.parent ? n.parent.name : null, active: !!n.activeInHierarchy });
+        return;
+      }
+      var ch = n.children || [];
+      for (var k = 0; k < ch.length; k++) walk(ch[k]);
+    })(cc.director.getScene());
+    return out;
+  }
   function vdbgSnap() {
     try {
       var g = Guide(), lv = levelComp(), pg = pageGame();
@@ -46,26 +64,47 @@
       var steps = g && g._steps ? g._steps.length : 0;
       var done = countDone(g);
       var all = steps > 0 && done === steps;
-      var pv = !!popShown('PopVictory'), pf = !!popShown('PopFail');
-      if ((pv || pf) && VDBG.samples.length < 500) {
-        vdbgPush(VDBG.samples, { t: Date.now(), gen: LEVEL_GEN, src: src, pv: pv, pf: pf, done: done, steps: steps, all: all, level: lv && lv.node ? lv.node.name : null, timer: pg ? pg.countdownNum : null });
+      var levelName = lv && lv.node ? lv.node.name : null;
+      var pvNode = popShown('PopVictory');
+      var pfNode = popShown('PopFail');
+      var vOk = pvNode ? { path: panelPath(pvNode), name: pvNode.name, parent: pvNode.parent ? pvNode.parent.name : null, active: !!pvNode.activeInHierarchy } : null;
+      var fOk = pfNode ? { path: panelPath(pfNode), name: pfNode.name, parent: pfNode.parent ? pfNode.parent.name : null, active: !!pfNode.activeInHierarchy } : null;
+
+      // 接受/拒绝都记录 path/name/parent/active/gen/done/steps
+      var vNodes = activePanelNodes('PopVictory');
+      for (var i = 0; i < vNodes.length; i++) {
+        var vn = vNodes[i], okV = vn.parent === 'Pop';
+        if (VDBG.samples.length < 500) vdbgPush(VDBG.samples, { t: Date.now(), gen: LEVEL_GEN, src: src, name: vn.name, path: vn.path, parent: vn.parent, active: vn.active, done: done, steps: steps, all: all, accepted: okV, level: levelName, timer: pg ? pg.countdownNum : null });
+        if (!okV && VDBG.rejected.length < 500) {
+          vdbgPush(VDBG.rejected, { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: vn.name, path: vn.path, parent: vn.parent, active: vn.active, reason: 'wrong-parent', src: src });
+          log('WIN_REJECTED', 'wrong-parent', vn.path, 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps);
+        }
       }
-      // 只在本关代次 + 全部 tips 完成后，首次采到 PopVictory 就锁存（不要求稳定可见）
-      if (pv && all && !winLatched()) {
-        WIN_LATCHED = { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: 'PopVictory', level: lv && lv.node ? lv.node.name : null };
-        vdbgPush(VDBG.latches, { ev: 'win', t: WIN_LATCHED.t, gen: LEVEL_GEN, done: done, steps: steps, name: 'PopVictory', level: WIN_LATCHED.level, src: src });
-        log('WIN_LATCHED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'src=' + src);
+      var fNodes = activePanelNodes('PopFail');
+      for (var j = 0; j < fNodes.length; j++) {
+        var fn = fNodes[j], okF = fn.parent === 'Pop';
+        if (VDBG.samples.length < 500) vdbgPush(VDBG.samples, { t: Date.now(), gen: LEVEL_GEN, src: src, name: fn.name, path: fn.path, parent: fn.parent, active: fn.active, done: done, steps: steps, all: all, accepted: okF, level: levelName, timer: pg ? pg.countdownNum : null });
+        if (!okF && VDBG.rejected.length < 500) {
+          vdbgPush(VDBG.rejected, { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: fn.name, path: fn.path, parent: fn.parent, active: fn.active, reason: 'fail-wrong-parent', src: src });
+          log('FAIL_REJECTED', 'wrong-parent', fn.path, 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps);
+        }
       }
-      // 中途面板（steps 未完成）只记录为拒绝，绝不锁存
-      if (pv && !all) {
-        if (VDBG.rejected.length < 500) vdbgPush(VDBG.rejected, { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: 'PopVictory', reason: 'not-all-tips', src: src });
-        log('WIN_REJECTED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'src=' + src);
+
+      // 只在本关代次 + 全部 tips 完成后，首次采到真 PopVictory 就锁存
+      if (vOk && all && !winLatched()) {
+        WIN_LATCHED = { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: vOk.name, path: vOk.path, parent: vOk.parent, active: vOk.active, level: levelName };
+        vdbgPush(VDBG.latches, { ev: 'win', t: WIN_LATCHED.t, gen: LEVEL_GEN, done: done, steps: steps, name: vOk.name, path: vOk.path, parent: vOk.parent, active: vOk.active, level: levelName, src: src });
+        log('WIN_LATCHED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'path=' + vOk.path, 'src=' + src);
+      }
+      if (vOk && !all && VDBG.rejected.length < 500) {
+        vdbgPush(VDBG.rejected, { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: vOk.name, path: vOk.path, parent: vOk.parent, active: vOk.active, reason: 'not-all-tips', src: src });
+        log('WIN_REJECTED', 'not-all-tips', vOk.path, 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps);
       }
       // PopFail 独立锁存，绝不与胜利共用
-      if (pf && !failLatched()) {
-        FAIL_LATCHED = { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: 'PopFail', level: lv && lv.node ? lv.node.name : null };
-        vdbgPush(VDBG.latches, { ev: 'fail', t: FAIL_LATCHED.t, gen: LEVEL_GEN, done: done, steps: steps, name: 'PopFail', level: FAIL_LATCHED.level, src: src });
-        log('FAIL_LATCHED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'src=' + src);
+      if (fOk && !failLatched()) {
+        FAIL_LATCHED = { t: Date.now(), gen: LEVEL_GEN, done: done, steps: steps, name: fOk.name, path: fOk.path, parent: fOk.parent, active: fOk.active, level: levelName };
+        vdbgPush(VDBG.latches, { ev: 'fail', t: FAIL_LATCHED.t, gen: LEVEL_GEN, done: done, steps: steps, name: fOk.name, path: fOk.path, parent: fOk.parent, active: fOk.active, level: levelName, src: src });
+        log('FAIL_LATCHED', 'gen=' + LEVEL_GEN, 'done=' + done + '/' + steps, 'path=' + fOk.path, 'src=' + src);
       }
     } catch (e) {}
   }
@@ -1030,8 +1069,10 @@
     var found = null;
     (function walk(n) {
       if (found || !n) return;
-      // 面板可能挂在 Pop 下，也可能直接在 UserInterface 下：名字匹配 + 激活即算（2026-11-15 放宽）
-      if (n.name === name && n.activeInHierarchy) { found = n; return; }
+      // 2026-11-16 远山按历史 Pi 实测恢复严格父节点校验：
+      // 真实路径 /UIRoot/Root2D/UserInterface/Pop/PopVictory；
+      // 名字对、激活、且 parent.name==='Pop' 才算数。
+      if (n.name === name && n.activeInHierarchy && n.parent && n.parent.name === 'Pop') { found = n; return; }
       var ch = n.children || [];
       for (var k = 0; k < ch.length; k++) walk(ch[k]);
     })(cc.director.getScene());

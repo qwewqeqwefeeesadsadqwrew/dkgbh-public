@@ -3,7 +3,7 @@
  * 不用 ignoreSearch（Chrome 线性扫描 thousands 条会拖死主线程）——改成「去掉 query 后精确匹配」。
  * 入口页 / SW 本身 / 自动玩脚本永远走网络，保证改版能推出去。
  */
-var CACHE = 'dkgbh-rt-v6';
+var CACHE = 'dkgbh-rt-v7';
 var ALWAYS_NETWORK = /(?:^|\/)(?:index[^/]*\.html|precache\.(?:js|json)|sw\.js|[^/]*(?:boot|autoplay)[^/]*\.js)$/;
 var CACHEABLE = /\.(js|mjs|json|css|png|jpe?g|webp|gif|mp3|ogg|wav|mp4|cconb|wasm|bin|ttf|otf|woff2?|atlas|plist)$/i;
 
