@@ -1530,7 +1530,7 @@
           log('LEVEL', idx, r0.reason, r0.tips);
           k++;
           // 第 16 条：胜利面板出现后先看 1.2~3 秒；非胜利也停 0.9~1.8 秒再切
-          var pause = (r0.reason === 'win') ? humanGap(1800, 1200, 3000, 0.05) : humanGap(1200, 900, 1800, 0.03);
+          var pause = (r0.reason === 'win') ? humanGap(2000, 1500, 3000, 0.03) : humanGap(1200, 900, 1800, 0.03);
           log('level-pause', Math.round(pause) + 'ms', r0.reason);
           return sleep(pause).then(one);
         });
